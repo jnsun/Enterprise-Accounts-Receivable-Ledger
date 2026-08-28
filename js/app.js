@@ -115,7 +115,7 @@ const App = {
     const items = [{ key: 'ledger', label: '台账总览', icon: '▤', show: Auth.can('view') || Auth.can('view_all') || Auth.isAdmin }];
     if (Auth.can('import')) items.push({ key: 'import-guide', label: 'Excel 导入', icon: '⇪', show: true });
     if (Auth.can('delete') || Auth.can('import')) items.push({ key: 'batches', label: '导入批次管理', icon: '☰', show: true });
-    if (Auth.isSuperAdmin) items.push({ key: 'admin', label: '用户管理', icon: '⚿', show: true });
+    if (Auth.isAdmin) items.push({ key: 'admin', label: '用户管理', icon: '⚿', show: true });
     if (Auth.isAdmin) items.push({ key: 'settings', label: '系统设置', icon: '⚙', show: true });
     // 无任何可见权限的部门用户也允许看总览（受 RLS 限制可能为空）
     nav.innerHTML = items.filter(i => i.show).map(i => `
