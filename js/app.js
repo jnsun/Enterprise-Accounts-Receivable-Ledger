@@ -63,7 +63,8 @@ const App = {
   renderApp() {
     const root = document.getElementById('root');
     const p = Auth.currentProfile;
-    const deptName = (p.departments && p.departments.name) || (Auth.isAdmin ? '系统管理员' : '未分配部门');
+    const au = Auth.arUser || {};
+    const deptName = (au.departments && au.departments.name) || (Auth.isAdmin ? '系统管理员' : '未分配部门');
 
     root.innerHTML = `
       <div class="app-shell">
@@ -80,7 +81,7 @@ const App = {
             <div class="topbar-title" id="topbar-title">台账总览</div>
             <div class="topbar-user">
               <span class="user-dept">${Utils.escapeHtml(deptName)}</span>
-              <span class="user-name">${Utils.escapeHtml(p.full_name || '用户')}</span>
+              <span class="user-name">${Utils.escapeHtml(au.full_name || p.full_name || '用户')}</span>
               <button class="btn btn-xs" data-act="pwd">修改密码</button>
               <button class="btn btn-xs" data-act="logout">退出</button>
             </div>
