@@ -11,6 +11,8 @@ const Auth = {
   /** 当前用户权限对象 { view: true, ... }；管理员为全部 true */
   perms: {},
   isAdmin: false,
+  /** 台账超级管理员（独立于月报系统） */
+  isSuperAdmin: false,
 
   /** 初始化会话：已登录返回 {user, profile}，否则 null */
   async init() {
@@ -38,9 +40,11 @@ const Auth = {
     return { profile: data, error: null };
   },
 
-  /** 加载当前用户权限 */
+  /** 加载当前用户权限（台账独立角色体系，与月报系统互不影响） */
   async loadPerms() {
-    this.isAdmin = this.currentProfile && this.currentProfile.role === 'admin';
+    const p = this.currentProfile;
+    this.isSuperAdmin = !!(p && p.ar_super_admin === true);
+    this.isAdmin = !!(p && (p.ar_role === 'admin' || this.isSuperAdmin));
     this.perms = {};
     if (this.isAdmin) {
       PERM_DEFS.forEach(p => { this.perms[p.key] = true; });
@@ -123,5 +127,6 @@ const Auth = {
     this.currentProfile = null;
     this.perms = {};
     this.isAdmin = false;
+    this.isSuperAdmin = false;
   },
 };
