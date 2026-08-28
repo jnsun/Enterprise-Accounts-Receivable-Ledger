@@ -1,155 +1,35 @@
 -- ==========================================================================
--- 企业应收账款台账系统 - Supabase 数据库 Schema（v1 · 独立版）
+-- 企业应收账款台账系统 - Supabase 数据库 Schema（v1 · 共用实例版）
 -- ==========================================================================
--- 适用环境：腾讯云服务器自部署 Supabase（独立实例，与安全生产管理系统
--- 数据完全分开，互不依赖）。
+-- 适用环境：腾讯云自托管 Supabase（140.143.247.55，与「施工项目月报管理
+-- 系统」「资质证照管理」共用同一实例、同一账号体系）。
 --
--- 本文件自包含，在新实例上一次性执行即可，包含：
---   1. departments          部门表 + 种子数据
---   2. profiles             用户档案表（角色 / 部门）+ 注册触发器
---   3. is_admin() 等辅助函数（含登录标识符解析 resolve_login_identifier）
---   4. ar_settings          全局设置（超期预警天数，单行表）
---   5. ar_import_batches    Excel 导入批次（支持按批次全部/部分删除）
---   6. ar_ledger            应收账款台账（核心表）
---   7. ar_invoices          开票明细（每笔开票日期与金额，1:N）
---   8. ar_user_perms        部门用户权限（管理员逐人开放）
---   9. RLS 行级安全（管理员全量；部门用户按权限 + 本部门数据）
+-- 本文件只创建台账系统自己的对象（全部 ar_ 前缀）：
+--   1. ar_settings          全局设置（超期预警天数，单行表）
+--   2. ar_import_batches    Excel 导入批次（支持按批次全部/部分删除）
+--   3. ar_ledger            应收账款台账（核心表）
+--   4. ar_invoices          开票明细（每笔开票日期与金额，1:N）
+--   5. ar_user_perms        部门用户权限（管理员逐人开放）
+--   6. ar_can()/ar_can_see_row() 权限辅助函数
+--   7. RLS 行级安全（管理员全量；部门用户按权限 + 本部门数据）
+--
+-- 【不复用也不修改】月报系统的共享对象：
+--   departments / profiles / handle_new_user 触发器 /
+--   is_admin() / resolve_login_identifier() —— 台账直接引用，零改动。
+--
+-- 账号说明：
+--   - 账号在月报系统后台创建（管理员/部门账号通用）；
+--   - 首个台账管理员 = 把某账号的 profiles.role 改为 'admin'
+--     （该账号在月报系统里通常已是管理员，无需改动）；
+--   - 部门用户权限由台账系统内「用户权限」页逐人开放（存 ar_user_perms）。
 --
 -- 执行方法：
---   浏览器打开 Supabase Studio（通常为 http://服务器IP:8000）→ 左侧
---   SQL Editor → New query → 粘贴本文件全部内容 → Run。
---   幂等可重复执行。
---
--- 执行后创建管理员账号（两步）：
---   ① Studio → Authentication → Users → Add user → 填邮箱和密码、
---      勾选 Auto Confirm User；
---   ② 在 SQL Editor 执行（把邮箱换成上一步的）：
---      UPDATE public.profiles SET role = 'admin', full_name = '管理员'
---      WHERE id = (SELECT id FROM auth.users WHERE email = 'admin@xxx.com');
+--   Studio（ssh -L 隧道 http://127.0.0.1:3000）或通过 Nginx 暴露的入口
+--   → SQL Editor → 粘贴本文件全部内容 → Run。幂等可重复执行。
 -- ==========================================================================
 
 -- --------------------------------------------------------------------------
--- 1. 部门表
--- --------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.departments (
-  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  name       TEXT NOT NULL UNIQUE,               -- 部门名称
-  code       TEXT UNIQUE,                        -- 部门编码（可作为登录标识）
-  sort_order INTEGER DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 种子部门（按需增删；管理员也可后续在数据中维护）
-INSERT INTO public.departments (name, code, sort_order) VALUES
-  ('工程一部', 'DEPT-01', 1),
-  ('工程二部', 'DEPT-02', 2),
-  ('财务部',   'DEPT-03', 3)
-ON CONFLICT (name) DO NOTHING;
-
--- --------------------------------------------------------------------------
--- 2. 用户档案表（登录账号在 Supabase Auth 中，档案在此）
---    role: 'admin' 管理员（全部权限） | 'reporter' 部门用户（权限逐人开放）
--- --------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id            UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  full_name     TEXT,                            -- 姓名
-  phone         TEXT UNIQUE,                     -- 手机号（可作为登录标识）
-  role          TEXT NOT NULL DEFAULT 'reporter'
-                CHECK (role IN ('admin', 'reporter')),
-  department_id UUID REFERENCES public.departments(id) ON DELETE SET NULL,
-  created_at    TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 新用户注册时自动建档（Studio 手工添加用户同样触发）
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
-BEGIN
-  INSERT INTO public.profiles (id, full_name, role)
-  VALUES (
-    NEW.id,
-    COALESCE(NEW.raw_user_meta_data ->> 'full_name', NEW.raw_user_meta_data ->> 'name', split_part(NEW.email, '@', 1)),
-    'reporter'
-  )
-  ON CONFLICT (id) DO NOTHING;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
-DROP TRIGGER IF EXISTS trg_on_auth_user_created ON auth.users;
-CREATE TRIGGER trg_on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
-
--- --------------------------------------------------------------------------
--- 3. 辅助函数
--- --------------------------------------------------------------------------
-
--- 3.1 updated_at 自动维护
-CREATE OR REPLACE FUNCTION public.update_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- 3.2 管理员判断
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE id = auth.uid() AND role = 'admin'
-  );
-$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
-
--- 3.3 登录标识符解析：邮箱 / 手机号 / 部门名称 / 部门编码 -> 登录邮箱
-CREATE OR REPLACE FUNCTION public.resolve_login_identifier(p_identifier TEXT)
-RETURNS JSONB
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
-AS $$
-DECLARE
-  v_id     TEXT := trim(COALESCE(p_identifier, ''));
-  v_email  TEXT;
-BEGIN
-  IF v_id = '' THEN RETURN NULL; END IF;
-
-  -- 邮箱直接返回
-  IF v_id ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN
-    RETURN jsonb_build_object('email', lower(v_id));
-  END IF;
-
-  -- 手机号 -> 该用户档案对应的登录邮箱
-  IF v_id ~ '^1[0-9]{10}$' THEN
-    SELECT lower(u.email) INTO v_email
-    FROM public.profiles p
-    JOIN auth.users u ON u.id = p.id
-    WHERE p.phone = v_id
-    LIMIT 1;
-    IF v_email IS NOT NULL THEN
-      RETURN jsonb_build_object('email', v_email);
-    END IF;
-  END IF;
-
-  -- 部门名称 / 部门编码 -> 该部门任一账号的登录邮箱（优先普通用户）
-  SELECT lower(u.email) INTO v_email
-  FROM public.departments d
-  JOIN public.profiles p ON p.department_id = d.id
-  JOIN auth.users u ON u.id = p.id
-  WHERE d.name = v_id OR d.code = v_id
-  ORDER BY (p.role = 'admin'), p.created_at
-  LIMIT 1;
-  IF v_email IS NOT NULL THEN
-    RETURN jsonb_build_object('email', v_email);
-  END IF;
-
-  RETURN NULL;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.resolve_login_identifier(TEXT) TO authenticated, anon;
-
--- --------------------------------------------------------------------------
--- 4. 全局设置（单行：超期预警天数）
+-- 1. 全局设置（单行：超期预警天数）
 -- --------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.ar_settings (
   id         INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
@@ -161,7 +41,7 @@ INSERT INTO public.ar_settings (id, warn_days) VALUES (1, 90)
   ON CONFLICT (id) DO NOTHING;
 
 -- --------------------------------------------------------------------------
--- 5. 导入批次（一次 Excel 导入 = 一个批次；支持整批或部分删除）
+-- 2. 导入批次（一次 Excel 导入 = 一个批次；支持整批或部分删除）
 -- --------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.ar_import_batches (
   id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -172,10 +52,10 @@ CREATE TABLE IF NOT EXISTS public.ar_import_batches (
 );
 
 -- --------------------------------------------------------------------------
--- 6. 应收账款台账（核心表）
+-- 3. 应收账款台账（核心表）
 --    department_id：数据归属部门（RLS 按此隔离部门可见范围）。
---    导入时按"施工部门"名称自动匹配 departments.name，匹配不上由管理员
---    在编辑中手工指定；金额单位默认万元（与导入模板一致）。
+--    导入时按"施工部门"名称自动匹配 departments.name（复用月报系统部门表），
+--    匹配不上由管理员在编辑中手工指定；金额单位默认万元（与导入模板一致）。
 -- --------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.ar_ledger (
   id                   UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -215,13 +95,23 @@ CREATE INDEX IF NOT EXISTS idx_ar_ledger_dept      ON public.ar_ledger(departmen
 CREATE INDEX IF NOT EXISTS idx_ar_ledger_batch     ON public.ar_ledger(batch_id);
 CREATE INDEX IF NOT EXISTS idx_ar_ledger_contract  ON public.ar_ledger(contract_no);
 
+-- updated_at 自动维护（update_updated_at() 函数月报/证照系统已建，直接复用；
+-- 若不存在则在此补建，保证脚本自洽）
+CREATE OR REPLACE FUNCTION public.update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 DROP TRIGGER IF EXISTS trg_ar_ledger_updated_at ON public.ar_ledger;
 CREATE TRIGGER trg_ar_ledger_updated_at
   BEFORE UPDATE ON public.ar_ledger
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
 -- --------------------------------------------------------------------------
--- 7. 开票明细（每笔开票：日期 + 金额；随台账行级联删除）
+-- 4. 开票明细（每笔开票：日期 + 金额；随台账行级联删除）
 -- --------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.ar_invoices (
   id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -237,7 +127,7 @@ CREATE TABLE IF NOT EXISTS public.ar_invoices (
 CREATE INDEX IF NOT EXISTS idx_ar_invoices_ledger ON public.ar_invoices(ledger_id);
 
 -- --------------------------------------------------------------------------
--- 8. 部门用户权限（管理员逐人开放；管理员账号天然拥有全部权限）
+-- 5. 部门用户权限（管理员逐人开放；管理员账号天然拥有全部权限）
 --    perms JSONB 键：view / view_all / add / edit / delete / import / export
 -- --------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.ar_user_perms (
@@ -248,10 +138,10 @@ CREATE TABLE IF NOT EXISTS public.ar_user_perms (
 );
 
 -- --------------------------------------------------------------------------
--- 9. 权限辅助函数
+-- 6. 权限辅助函数（is_admin() 复用月报/证照系统已有定义）
 -- --------------------------------------------------------------------------
 
--- 9.1 当前用户是否拥有某项台账权限（管理员恒真）
+-- 6.1 当前用户是否拥有某项台账权限（管理员恒真）
 CREATE OR REPLACE FUNCTION public.ar_can(p_key TEXT)
 RETURNS BOOLEAN AS $$
   SELECT public.is_admin()
@@ -261,7 +151,7 @@ RETURNS BOOLEAN AS $$
          FALSE);
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
 
--- 9.2 当前用户是否可见某条台账（管理员 / view_all 全量；否则限本部门）
+-- 6.2 当前用户是否可见某条台账（管理员 / view_all 全量；否则限本部门）
 CREATE OR REPLACE FUNCTION public.ar_can_see_row(p_department_id UUID)
 RETURNS BOOLEAN AS $$
   SELECT public.is_admin()
@@ -272,36 +162,16 @@ RETURNS BOOLEAN AS $$
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
 
 -- --------------------------------------------------------------------------
--- 10. RLS 行级安全
+-- 7. RLS 行级安全（仅台账自己的表；departments/profiles 沿用月报系统策略）
 -- --------------------------------------------------------------------------
 
-ALTER TABLE public.departments       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.profiles          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ar_settings       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ar_import_batches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ar_ledger         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ar_invoices       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ar_user_perms     ENABLE ROW LEVEL SECURITY;
 
--- 10.1 部门：已登录用户可读
-DROP POLICY IF EXISTS "ar_depts_select" ON public.departments;
-CREATE POLICY "ar_depts_select" ON public.departments
-  FOR SELECT TO authenticated USING (true);
-
--- 10.2 用户档案：本人可读自己，管理员可读全部；本人与管理员可更新
-DROP POLICY IF EXISTS "ar_profiles_select" ON public.profiles;
-CREATE POLICY "ar_profiles_select" ON public.profiles
-  FOR SELECT TO authenticated USING (
-    id = auth.uid() OR public.is_admin()
-  );
-
-DROP POLICY IF EXISTS "ar_profiles_update" ON public.profiles;
-CREATE POLICY "ar_profiles_update" ON public.profiles
-  FOR UPDATE TO authenticated USING (
-    id = auth.uid() OR public.is_admin()
-  );
-
--- 10.3 设置：已登录可读（前端计算超期预警需要），写仅管理员
+-- 7.1 设置：已登录可读（前端计算超期预警需要），写仅管理员
 DROP POLICY IF EXISTS "ar_settings_select" ON public.ar_settings;
 CREATE POLICY "ar_settings_select" ON public.ar_settings
   FOR SELECT TO authenticated USING (true);
@@ -310,7 +180,7 @@ DROP POLICY IF EXISTS "ar_settings_update_admin" ON public.ar_settings;
 CREATE POLICY "ar_settings_update_admin" ON public.ar_settings
   FOR UPDATE TO authenticated USING (public.is_admin());
 
--- 10.4 导入批次：本人可见自己的批次；有导入/删除权限者与管理员可见全部
+-- 7.2 导入批次：本人可见自己的批次；有导入/删除权限者与管理员可见全部
 DROP POLICY IF EXISTS "ar_batches_select" ON public.ar_import_batches;
 CREATE POLICY "ar_batches_select" ON public.ar_import_batches
   FOR SELECT TO authenticated USING (
@@ -331,7 +201,7 @@ DROP POLICY IF EXISTS "ar_batches_delete" ON public.ar_import_batches;
 CREATE POLICY "ar_batches_delete" ON public.ar_import_batches
   FOR DELETE TO authenticated USING (public.is_admin() OR public.ar_can('delete'));
 
--- 10.5 台账
+-- 7.3 台账
 -- 读：管理员 / view_all 全量；部门用户限本部门
 DROP POLICY IF EXISTS "ar_ledger_select" ON public.ar_ledger;
 CREATE POLICY "ar_ledger_select" ON public.ar_ledger
@@ -370,7 +240,7 @@ CREATE POLICY "ar_ledger_delete" ON public.ar_ledger
     )
   );
 
--- 10.6 开票明细：读/写跟随所属台账行的权限
+-- 7.4 开票明细：读/写跟随所属台账行的权限
 DROP POLICY IF EXISTS "ar_invoices_select" ON public.ar_invoices;
 CREATE POLICY "ar_invoices_select" ON public.ar_invoices
   FOR SELECT TO authenticated USING (
@@ -410,7 +280,7 @@ CREATE POLICY "ar_invoices_delete" ON public.ar_invoices
     )
   );
 
--- 10.7 权限表：本人可读自己的权限（左侧权限栏展示），管理员可读写全部
+-- 7.5 权限表：本人可读自己的权限（左侧权限栏展示），管理员可读写全部
 DROP POLICY IF EXISTS "ar_perms_select" ON public.ar_user_perms;
 CREATE POLICY "ar_perms_select" ON public.ar_user_perms
   FOR SELECT TO authenticated USING (
@@ -430,19 +300,20 @@ CREATE POLICY "ar_perms_delete_admin" ON public.ar_user_perms
   FOR DELETE TO authenticated USING (public.is_admin());
 
 -- --------------------------------------------------------------------------
--- 11. 授权
+-- 8. 授权
 -- --------------------------------------------------------------------------
+GRANT ALL ON public.ar_settings       TO authenticated;
 GRANT ALL ON public.ar_import_batches TO authenticated;
-GRANT ALL ON public.ar_ledger TO authenticated;
-GRANT ALL ON public.ar_invoices TO authenticated;
-GRANT ALL ON public.ar_user_perms TO authenticated;
+GRANT ALL ON public.ar_ledger         TO authenticated;
+GRANT ALL ON public.ar_invoices       TO authenticated;
+GRANT ALL ON public.ar_user_perms     TO authenticated;
 
 -- ==========================================================================
 -- 验证 SQL：
---   SELECT * FROM public.departments ORDER BY sort_order;
 --   SELECT * FROM public.ar_settings;
---   SELECT id, full_name, role, department_id FROM public.profiles;
--- 首个管理员（先在 Authentication → Users 添加用户，再执行）：
---   UPDATE public.profiles SET role = 'admin', full_name = '管理员'
---   WHERE id = (SELECT id FROM auth.users WHERE email = 'admin@example.com');
+--   SELECT count(*) FROM public.ar_ledger;
+--   SELECT id, full_name, role, department_id FROM public.profiles;  -- 复用月报账号
+--
+-- 台账管理员：月报系统里的管理员自动拥有台账全部权限（is_admin 共用）；
+-- 部门用户登录台账后，由台账「用户权限」页逐人开放 7 项权限。
 -- ==========================================================================
