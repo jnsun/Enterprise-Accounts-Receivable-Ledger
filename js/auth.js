@@ -89,8 +89,8 @@ const Auth = {
     if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(id)) {
       email = id.toLowerCase();
     } else {
-      // 手机号 / 部门名称 / 部门编码 -> 复用月报系统 RPC 解析
-      const { data, error } = await sb.rpc('resolve_login_identifier', { p_identifier: id });
+      // 手机号 → 台账自己的解析（只匹配台账用户，与月报账号隔离）
+      const { data, error } = await sb.rpc('ar_resolve_login_identifier', { p_identifier: id });
       if (error) {
         return { success: false, error: '未找到对应的登录账号，请使用完整邮箱登录' };
       }
