@@ -462,8 +462,8 @@ const Editor = {
     if (Auth.isAdmin) {
       const dept = el.querySelector('#ed-department_id');
       payload.department_id = dept && dept.value ? dept.value : null;
-    } else if (this.isNew && Auth.currentProfile.department_id) {
-      payload.department_id = Auth.currentProfile.department_id;
+    } else if (this.isNew && Auth.arUser && Auth.arUser.department_id) {
+      payload.department_id = Auth.arUser.department_id;
     }
 
     // 校验
