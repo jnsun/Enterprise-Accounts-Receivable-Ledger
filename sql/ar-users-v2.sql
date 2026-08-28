@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS public.ar_users (
   created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 主管理员保护标记（受保护账号不可被任何人删除/停用/降级）
+ALTER TABLE public.ar_users ADD COLUMN IF NOT EXISTS ar_protected BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE public.ar_users SET ar_protected = TRUE WHERE email = 'jnsun@qq.com';
+
 -- v1 迁移：若 profiles 上存在旧角色列，把管理员/停用账号迁入 ar_users 后移除旧列
 DO $$
 BEGIN
@@ -244,6 +248,10 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION '用户不存在';
   END IF;
+  -- 受保护的主管理员：不能被停用或降级（防绕道变相删除）
+  IF v_target.ar_protected = TRUE AND p_ar_role IS NOT NULL AND p_ar_role <> 'admin' THEN
+    RAISE EXCEPTION '受保护的主管理员账号不能被停用或降级';
+  END IF;
 
   -- 普通管理员只能编辑报账员（含自己停用的，可恢复；不能提权为管理员）
   IF NOT public.ar_is_super_admin() THEN
@@ -364,6 +372,9 @@ BEGIN
   SELECT * INTO v_target FROM public.ar_users WHERE user_id = p_user_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION '用户不存在';
+  END IF;
+  IF v_target.ar_protected THEN
+    RAISE EXCEPTION '该账号是受保护的主管理员，不能删除';
   END IF;
 
   IF NOT v_caller_super THEN
