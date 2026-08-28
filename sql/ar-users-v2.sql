@@ -180,14 +180,8 @@ BEGIN
   )
   RETURNING id INTO v_user_id;
 
-  INSERT INTO auth.identities (
-    id, user_id, provider_id, provider_name, identity_data,
-    last_sign_in_at, created_at, updated_at
-  ) VALUES (
-    gen_random_uuid(), v_user_id, 'email', 'email',
-    jsonb_build_object('sub', v_user_id::text, 'email', v_email, 'email_verified', false),
-    now(), now(), now()
-  );
+  -- 注：不插 auth.identities——新版 GoTrue 表结构已变且密码登录不需要；
+  -- 月报系统的 create_dept_user 同样不插，生产验证可用。
 
   -- 只写台账自己的用户表；profiles 由触发器生成最小记录（无部门无角色）
   INSERT INTO public.ar_users (user_id, email, full_name, phone, department_id, ar_role)
