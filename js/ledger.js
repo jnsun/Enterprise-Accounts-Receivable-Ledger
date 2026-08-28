@@ -15,7 +15,7 @@ const Ledger = {
   async init() {
     const { data: setting } = await sb.from('ar_settings').select('*').eq('id', 1).maybeSingle();
     if (setting) this.settings = setting;
-    const { data: depts } = await sb.from('departments').select('id, name').order('sort_order');
+    const { data: depts } = await sb.from('ar_departments').select('id, name').order('sort_order');
     this.departments = depts || [];
   },
 
@@ -415,7 +415,7 @@ const Editor = {
 
   bindModal(el) {
     el.querySelector('[data-act="close"]').addEventListener('click', () => el.remove());
-    el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+    Utils.bindMaskClose(el, () => el.remove());
     el.querySelectorAll('.mtab').forEach(t => t.addEventListener('click', () => {
       this.activeTab = t.dataset.tab;
       el.querySelectorAll('.mtab').forEach(x => x.classList.toggle('active', x === t));
