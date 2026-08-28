@@ -126,11 +126,71 @@ const Utils = {
           </div>
         </div>`;
       document.body.appendChild(el);
+      let sx = 0, sy = 0;
+      el.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
       el.addEventListener('click', e => {
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
         if (e.target === el || e.target.closest('[data-act="cancel"]')) { el.remove(); resolve(false); }
         else if (e.target.closest('[data-act="ok"]')) { el.remove(); resolve(true); }
       });
     });
+  },
+
+  /**
+   * 弹窗遮罩点击关闭（带拖拽误触保护：按下滑动超 6px 不关闭）
+   * @param {HTMLElement} mask 遮罩元素
+   * @param {Function} onClose 点击遮罩关闭时回调
+   */
+  bindMaskClose(mask, onClose) {
+    let sx = 0, sy = 0;
+    mask.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
+    mask.addEventListener('click', e => {
+      if (e.target !== mask) return;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+      onClose();
+    });
+  },
+
+  /** 密码强度评分（0-5）：长度≥8 / 大写 / 小写 / 数字 / 符号 各计 1 分 */
+  pwdScore(v) {
+    if (!v) return 0;
+    let s = 0;
+    if (v.length >= 8) s++;
+    if (/[A-Z]/.test(v)) s++;
+    if (/[a-z]/.test(v)) s++;
+    if (/[0-9]/.test(v)) s++;
+    if (/[^A-Za-z0-9]/.test(v)) s++;
+    return s;
+  },
+
+  /** 密码是否符合强密码规则（≥8 位 + 四类字符） */
+  pwdValid(v) { return this.pwdScore(v) >= 5; },
+
+  /** 给密码输入框绑定实时强度进度条（bar 进度条元素，hint 提示元素） */
+  bindPwdMeter(input, bar, hint) {
+    const colors = ['#e5e7eb', '#dc2626', '#f97316', '#eab308', '#84cc16', '#16a34a'];
+    const update = () => {
+      const v = input.value;
+      const s = this.pwdScore(v);
+      const ok = this.pwdValid(v);
+      bar.style.width = (v ? Math.max(s / 5 * 100, 8) : 0) + '%';
+      bar.style.background = v ? colors[s] : colors[0];
+      if (!v) {
+        hint.textContent = '至少 8 位，须同时包含大写字母、小写字母、数字和符号';
+        hint.classList.remove('ok');
+        return;
+      }
+      const missing = [];
+      if (v.length < 8) missing.push('至少 8 位');
+      if (!/[A-Z]/.test(v)) missing.push('大写字母');
+      if (!/[a-z]/.test(v)) missing.push('小写字母');
+      if (!/[0-9]/.test(v)) missing.push('数字');
+      if (!/[^A-Za-z0-9]/.test(v)) missing.push('符号');
+      hint.textContent = ok ? '✓ 密码强度合格' : '还缺：' + missing.join('、');
+      hint.classList.toggle('ok', ok);
+    };
+    input.addEventListener('input', update);
+    update();
   },
 
   /** 计算两个日期相差天数（b - a） */
