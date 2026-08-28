@@ -39,7 +39,7 @@ const Exporter = {
       </div>`;
     document.body.appendChild(el);
     el.querySelector('[data-act="close"]').addEventListener('click', () => el.remove());
-    el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+    Utils.bindMaskClose(el, () => el.remove());
 
     const boxes = [...el.querySelectorAll('.exp-field input')];
     const setAll = v => boxes.forEach(b => { b.checked = v; });
