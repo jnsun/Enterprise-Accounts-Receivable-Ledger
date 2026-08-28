@@ -17,7 +17,7 @@ const Admin = {
 
   async load() {
     const { data: profiles, error } = await sb.from('ar_users')
-      .select('user_id, email, full_name, phone, department_id, ar_role, ar_super_admin, ar_departments(name)')
+      .select('user_id, email, full_name, phone, department_id, ar_role, ar_super_admin, ar_protected, ar_departments(name)')
       .order('ar_super_admin', { ascending: false }).limit(500);
     if (error) { Utils.toast('用户列表加载失败：' + error.message, 'error'); return; }
     const { data: permsRows } = await sb.from('ar_user_perms').select('user_id, perms');
@@ -69,7 +69,9 @@ const Admin = {
       // 操作列
       const acts = [];
       const isBaoZhangYuan = u.ar_role === 'user';
-      if (canManage || isBaoZhangYuan) acts.push('<a data-act="edit" data-id="' + u.id + '">编辑</a>');
+      // 受保护的主管理员：只有本人能编辑（他人不可编辑/删除）
+      const canEditThis = canManage ? (!u.ar_protected || isSelf) : isBaoZhangYuan;
+      if (canEditThis) acts.push('<a data-act="edit" data-id="' + u.id + '">编辑</a>');
       // 删除：超级管理员可删除自己以外任何账号；普通管理员仅可删报账员；主管理员受保护不可删
       const canDelete = (Auth.isSuperAdmin && !isSelf && !u.ar_protected) || (!Auth.isSuperAdmin && isBaoZhangYuan);
       if (canDelete) acts.push('<a class="link-danger" data-act="del" data-id="' + u.id + '">删除</a>');
