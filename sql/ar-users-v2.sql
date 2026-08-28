@@ -141,8 +141,11 @@ DECLARE
   v_user_id UUID;
   v_email   TEXT := lower(trim(COALESCE(p_email,'')));
 BEGIN
-  IF NOT public.ar_is_super_admin() THEN
-    RAISE EXCEPTION '只有台账超级管理员才能管理账号';
+  IF NOT public.ar_is_admin() THEN
+    RAISE EXCEPTION '只有管理员才能新增账号';
+  END IF;
+  IF NOT public.ar_is_super_admin() AND p_ar_role <> 'user' THEN
+    RAISE EXCEPTION '普通管理员只能新增报账员账号';
   END IF;
   IF v_email = '' OR v_email !~* '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN
     RAISE EXCEPTION '邮箱格式不正确';
@@ -215,8 +218,8 @@ DECLARE
   v_target   public.ar_users;
   v_new_role TEXT;
 BEGIN
-  IF NOT public.ar_is_super_admin() THEN
-    RAISE EXCEPTION '只有台账超级管理员才能管理账号';
+  IF NOT public.ar_is_admin() THEN
+    RAISE EXCEPTION '只有管理员才能编辑账号';
   END IF;
   IF p_user_id IS NULL THEN
     RAISE EXCEPTION '缺少用户';
@@ -224,6 +227,16 @@ BEGIN
   SELECT * INTO v_target FROM public.ar_users WHERE user_id = p_user_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION '用户不存在';
+  END IF;
+
+  -- 普通管理员只能编辑报账员（含自己停用的，可恢复；不能提权为管理员）
+  IF NOT public.ar_is_super_admin() THEN
+    IF v_target.ar_super_admin = TRUE OR v_target.ar_role = 'admin' THEN
+      RAISE EXCEPTION '普通管理员只能编辑报账员账号';
+    END IF;
+    IF p_ar_role IS NOT NULL AND p_ar_role NOT IN ('user','disabled') THEN
+      RAISE EXCEPTION '普通管理员只能停用或恢复报账员，不能调整角色';
+    END IF;
   END IF;
 
   v_new_role := COALESCE(p_ar_role, v_target.ar_role);
