@@ -150,17 +150,33 @@ BEGIN
   IF v_email = '' OR v_email !~* '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN
     RAISE EXCEPTION '邮箱格式不正确';
   END IF;
-  IF p_password IS NULL OR length(p_password) < 6 THEN
-    RAISE EXCEPTION '密码长度至少 6 位';
+  -- 强密码：至少 8 位，含大小写字母、数字、符号
+  IF p_password IS NULL OR length(p_password) < 8
+     OR p_password !~ '[A-Z]' OR p_password !~ '[a-z]'
+     OR p_password !~ '[0-9]' OR p_password !~ '[^A-Za-z0-9]' THEN
+    RAISE EXCEPTION '密码须至少 8 位，且同时包含大写字母、小写字母、数字和符号';
   END IF;
   IF p_ar_role NOT IN ('admin','user') THEN
     RAISE EXCEPTION '角色不合法';
   END IF;
-  IF p_ar_role = 'user' AND p_department_id IS NULL THEN
-    RAISE EXCEPTION '报账员必须分配部门';
+  IF p_ar_role = 'user' AND (p_department_id IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.ar_departments WHERE id = p_department_id)) THEN
+    RAISE EXCEPTION '报账员必须分配有效部门';
   END IF;
   IF EXISTS (SELECT 1 FROM auth.users WHERE lower(email) = v_email) THEN
-    RAISE EXCEPTION '该邮箱已被使用（可能已存在于月报系统，请改用「添加已有账号」）';
+    -- 已有登录账号（月报建过，或曾被移出台账）：直接加入台账，不重设密码
+    SELECT u.id INTO v_user_id FROM auth.users u WHERE lower(u.email) = v_email;
+    IF EXISTS (SELECT 1 FROM public.ar_users WHERE user_id = v_user_id) THEN
+      RAISE EXCEPTION '该账号已在台账用户列表中';
+    END IF;
+    INSERT INTO public.ar_users (user_id, email, full_name, phone, department_id, ar_role)
+    VALUES (v_user_id, v_email, p_full_name, p_phone, p_department_id, p_ar_role);
+    IF p_perms <> '{}'::jsonb THEN
+      INSERT INTO public.ar_user_perms (user_id, perms, updated_by)
+      VALUES (v_user_id, p_perms, auth.uid())
+      ON CONFLICT (user_id) DO UPDATE SET perms = p_perms, updated_by = auth.uid(), updated_at = now();
+    END IF;
+    RETURN jsonb_build_object('id', v_user_id, 'email', v_email);
   END IF;
 
   INSERT INTO auth.users (
@@ -243,11 +259,17 @@ BEGIN
   IF v_new_role NOT IN ('admin','user','disabled') THEN
     RAISE EXCEPTION '角色不合法';
   END IF;
+  IF p_department_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM public.ar_departments WHERE id = p_department_id) THEN
+    RAISE EXCEPTION '部门不存在';
+  END IF;
   IF v_new_role = 'user' AND p_department_id IS NULL AND v_target.department_id IS NULL THEN
     RAISE EXCEPTION '报账员必须分配部门';
   END IF;
-  IF p_password IS NOT NULL AND length(p_password) < 6 THEN
-    RAISE EXCEPTION '密码长度至少 6 位';
+  IF p_password IS NOT NULL AND (length(p_password) < 8
+     OR p_password !~ '[A-Z]' OR p_password !~ '[a-z]'
+     OR p_password !~ '[0-9]' OR p_password !~ '[^A-Za-z0-9]') THEN
+    RAISE EXCEPTION '密码须至少 8 位，且同时包含大写字母、小写字母、数字和符号';
   END IF;
 
   IF v_target.ar_super_admin = TRUE
@@ -317,9 +339,8 @@ GRANT EXECUTE ON FUNCTION public.ar_resolve_login_identifier(TEXT) TO anon, auth
 -- 4.4 删除账号
 --     超级管理员：可删除除自己以外的任何账号
 --     普通管理员：仅可删除报账员（ar_role='user'）
---     行为：从 ar_users / ar_user_perms 移除（收回台账全部访问）；
---           若该账号在月报系统无任何身份（无部门、非管理员），连登录账号
---           一并删除；否则保留登录账号供月报系统继续使用。
+--     行为：仅从台账移除（ar_users / ar_user_perms），绝不删除登录账号，
+--           对月报系统零影响；该邮箱今后可通过「新增账号」重新加入台账。
 CREATE OR REPLACE FUNCTION public.ar_delete_user(p_user_id UUID)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -329,7 +350,6 @@ AS $$
 DECLARE
   v_caller_super BOOLEAN := public.ar_is_super_admin();
   v_target       public.ar_users;
-  v_mr           public.profiles;
 BEGIN
   IF NOT public.ar_is_admin() THEN
     RAISE EXCEPTION '只有管理员才能删除账号';
@@ -353,18 +373,11 @@ BEGIN
     END IF;
   END IF;
 
-  -- 判断该登录账号在月报系统是否有身份
-  SELECT * INTO v_mr FROM public.profiles WHERE id = p_user_id;
-  IF FOUND AND (v_mr.role = 'admin' OR v_mr.is_super_admin = TRUE OR v_mr.department_id IS NOT NULL) THEN
-    -- 月报在用：保留登录账号，仅收回台账访问
-    DELETE FROM public.ar_user_perms WHERE user_id = p_user_id;
-    DELETE FROM public.ar_users WHERE user_id = p_user_id;
-    RETURN jsonb_build_object('id', p_user_id, 'auth_deleted', FALSE);
-  ELSE
-    -- 纯台账账号（含从未用于月报的）：连登录账号一起删除（级联清理 profiles/权限）
-    DELETE FROM auth.users WHERE id = p_user_id;
-    RETURN jsonb_build_object('id', p_user_id, 'auth_deleted', TRUE);
-  END IF;
+  -- 只移出台账（ar_users / ar_user_perms），绝不删除登录账号——对月报系统零影响；
+  -- 该邮箱今后可随时通过「新增账号」重新加入台账（不设密码，保留原登录方式）
+  DELETE FROM public.ar_user_perms WHERE user_id = p_user_id;
+  DELETE FROM public.ar_users WHERE user_id = p_user_id;
+  RETURN jsonb_build_object('id', p_user_id);
 END;
 $$;
 
@@ -377,3 +390,49 @@ GRANT EXECUTE ON FUNCTION public.ar_delete_user(UUID) TO authenticated;
 --   WHERE email = '你的管理员邮箱'
 --   ON CONFLICT (user_id) DO UPDATE SET ar_role='admin', ar_super_admin=true;
 -- ==========================================================================
+
+-- --------------------------------------------------------------------------
+-- 12. 台账独立部门表（与月报 departments 彻底分离，两边互不影响）
+-- --------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.ar_departments (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       TEXT NOT NULL UNIQUE,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 首次部署：复制当前月报部门清单作为初始数据（同名即跳过，之后各自独立）
+INSERT INTO public.ar_departments (id, name, sort_order)
+SELECT d.id, d.name, COALESCE(d.sort_order, 0)
+FROM public.departments d
+WHERE NOT EXISTS (SELECT 1 FROM public.ar_departments);
+
+-- 台账用户 / 台账数据的部门外键切换到 ar_departments（沿用原部门 id，无缝迁移）
+ALTER TABLE public.ar_users DROP CONSTRAINT IF EXISTS ar_users_department_id_fkey;
+ALTER TABLE public.ar_users
+  ADD CONSTRAINT ar_users_department_id_fkey
+  FOREIGN KEY (department_id) REFERENCES public.ar_departments(id) ON DELETE RESTRICT;
+
+ALTER TABLE public.ar_ledger DROP CONSTRAINT IF EXISTS ar_ledger_department_id_fkey;
+ALTER TABLE public.ar_ledger
+  ADD CONSTRAINT ar_ledger_department_id_fkey
+  FOREIGN KEY (department_id) REFERENCES public.ar_departments(id) ON DELETE RESTRICT;
+
+-- RLS：所有人可读（下拉字典），增删改仅限管理员；被用户/数据引用的部门删不掉（RESTRICT）
+ALTER TABLE public.ar_departments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "ar_dept_select" ON public.ar_departments;
+CREATE POLICY "ar_dept_select" ON public.ar_departments
+  FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "ar_dept_insert" ON public.ar_departments;
+CREATE POLICY "ar_dept_insert" ON public.ar_departments
+  FOR INSERT TO authenticated WITH CHECK (public.ar_is_admin());
+
+DROP POLICY IF EXISTS "ar_dept_update" ON public.ar_departments;
+CREATE POLICY "ar_dept_update" ON public.ar_departments
+  FOR UPDATE TO authenticated USING (public.ar_is_admin());
+
+DROP POLICY IF EXISTS "ar_dept_delete" ON public.ar_departments;
+CREATE POLICY "ar_dept_delete" ON public.ar_departments
+  FOR DELETE TO authenticated USING (public.ar_is_admin());
