@@ -45,7 +45,7 @@ const Auth = {
   /** 加载当前用户权限（台账用户存于独立 ar_users 表，与月报系统隔离） */
   async loadPerms() {
     const { data: arUser } = await sb.from('ar_users')
-      .select('*, departments(name)')
+      .select('user_id, email, full_name, phone, department_id, ar_role, ar_super_admin, departments(name)')
       .eq('user_id', this.currentUser.id)
       .maybeSingle();
     this.arUser = arUser || null;
