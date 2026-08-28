@@ -41,7 +41,7 @@ const Importer = {
       </div>`;
     document.body.appendChild(el);
     el.querySelector('[data-act="close"]').addEventListener('click', () => el.remove());
-    el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+    Utils.bindMaskClose(el, () => el.remove());
     this.renderStepFile();
   },
 
