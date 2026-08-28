@@ -42,11 +42,11 @@ const Admin = {
     const rows = this.users.map(u => {
       const isSelf = u.id === Auth.currentUser.id;
       const dept = (u.departments && u.departments.name) || '未分配';
-      // 权限列：超级管理员可勾选报账员权限；普通管理员只读展示
+      // 权限列：管理员可勾选报账员权限；无权限查看者只读展示
       let permCell;
       if (u.ar_role !== 'user') {
         permCell = '<span class="muted">' + (u.ar_role === 'disabled' ? '停用中，无任何权限' : '拥有全部台账权限') + '</span>';
-      } else if (canManage) {
+      } else if (Auth.isAdmin) {
         permCell = PERM_DEFS.map(p => `
             <label class="perm-toggle" title="${p.label}">
               <input type="checkbox" data-user="${u.id}" data-perm="${p.key}" ${u.perms[p.key] ? 'checked' : ''}>
@@ -58,11 +58,16 @@ const Admin = {
       }
       // 操作列
       const acts = [];
-      if (canManage) acts.push('<a data-act="edit" data-id="' + u.id + '">编辑</a>');
+      const isBaoZhangYuan = u.ar_role === 'user' || (u.ar_role === 'disabled' && !u.ar_super_admin);
+      if (Auth.isSuperAdmin || isBaoZhangYuan) acts.push('<a data-act="edit" data-id="' + u.id + '">编辑</a>');
       // 删除：超级管理员可删除自己以外任何账号；普通管理员仅可删报账员
-      const canDelete = (Auth.isSuperAdmin && !isSelf) || (!Auth.isSuperAdmin && u.ar_role === 'user');
+      const canDelete = (Auth.isSuperAdmin && !isSelf) || (!Auth.isSuperAdmin && isBaoZhangYuan);
       if (canDelete) acts.push('<a class="link-danger" data-act="del" data-id="' + u.id + '">删除</a>');
-      if (canManage && !isSelf && !u.ar_super_admin) {
+      if (Auth.isSuperAdmin && !isSelf && !u.ar_super_admin) {
+        acts.push(u.ar_role === 'disabled'
+          ? '<a data-act="enable" data-id="' + u.id + '">恢复</a>'
+          : '<a data-act="disable" data-id="' + u.id + '">停用</a>');
+      } else if (!Auth.isSuperAdmin && isBaoZhangYuan && !isSelf) {
         acts.push(u.ar_role === 'disabled'
           ? '<a data-act="enable" data-id="' + u.id + '">恢复</a>'
           : '<a data-act="disable" data-id="' + u.id + '">停用</a>');
@@ -82,12 +87,12 @@ const Admin = {
       <div class="page-head">
         <h2>用户管理</h2>
         <span class="muted">${canManage
-          ? '超级管理员：新增/编辑/停用/删除账号；台账账号体系与月报系统互相独立'
-          : '管理员：可删除报账员账号；新增账号与编辑请联系超级管理员'}</span>
+          ? '超级管理员：新增/编辑/停用/删除全部账号；台账账号体系与月报系统互相独立'
+          : '管理员：可新增/编辑/停用/删除报账员账号；管理员账号由超级管理员管理'}</span>
       </div>
       <div class="toolbar">
-        <div class="toolbar-left"><span class="muted">共 ${this.users.length} 个账号 · 「删除」将移出台账；若该账号未在月报系统使用则连登录账号一并删除</span></div>
-        <div class="toolbar-right">${canManage ? '<button class="btn btn-primary" data-act="create">＋ 新增账号</button>' : ''}</div>
+        <div class="toolbar-left"><span class="muted">共 ${this.users.length} 个账号 · 「停用」可随时恢复；「删除」将移出台账，若未在月报系统使用则连登录账号一并删除</span></div>
+        <div class="toolbar-right">${Auth.isAdmin ? '<button class="btn btn-primary" data-act="create">＋ 新增账号</button>' : ''}</div>
       </div>
       <div class="table-wrap">
         <table class="admin-table">
@@ -98,7 +103,7 @@ const Admin = {
         </table>
       </div>`;
 
-    if (canManage) {
+    if (Auth.isAdmin) {
       page.querySelector('[data-act="create"]').addEventListener('click', () => this.userDialog(null));
       page.querySelectorAll('[data-act="edit"]').forEach(a => a.addEventListener('click', () => {
         const u = this.users.find(x => x.id === a.dataset.id);
@@ -166,13 +171,16 @@ const Admin = {
 
     const deptOpts = ['<option value="">（请选择部门）</option>', ...Ledger.departments.map(d =>
       `<option value="${d.id}" ${user && user.department_id === d.id ? 'selected' : ''}>${Utils.escapeHtml(d.name)}</option>`)].join('');
+    const adminOpt = Auth.isSuperAdmin ? '<option value="admin">管理员（全部台账权限）</option>' : '';
     const roleOpts = isNew
-      ? `<option value="user" selected>报账员（按权限开放）</option><option value="admin">管理员（全部台账权限）</option>`
+      ? `<option value="user" selected>报账员（按权限开放）</option>${adminOpt}`
       : user.ar_super_admin
         ? '<option value="admin" selected>超级管理员（SQL 设置，界面不可改）</option>'
-        : `<option value="user" ${user.ar_role === 'user' ? 'selected' : ''}>报账员（按权限开放）</option>
-           <option value="admin" ${user.ar_role === 'admin' ? 'selected' : ''}>管理员（全部台账权限）</option>
-           <option value="disabled" ${user.ar_role === 'disabled' ? 'selected' : ''}>已停用</option>`;
+        : Auth.isSuperAdmin
+          ? `<option value="user" ${user.ar_role === 'user' ? 'selected' : ''}>报账员（按权限开放）</option>${adminOpt}
+             <option value="disabled" ${user.ar_role === 'disabled' ? 'selected' : ''}>已停用</option>`
+          : `<option value="user" ${user.ar_role === 'user' ? 'selected' : ''}>报账员（按权限开放）</option>
+             <option value="disabled" ${user.ar_role === 'disabled' ? 'selected' : ''}>已停用</option>`;
     const permBoxes = PERM_DEFS.map(p => `
       <label class="perm-toggle"><input type="checkbox" data-perm="${p.key}" ${user && user.perms[p.key] ? 'checked' : ''}>
       <span>${p.label}</span></label>`).join('');
