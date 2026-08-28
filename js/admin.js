@@ -70,11 +70,11 @@ const Admin = {
       const acts = [];
       const isBaoZhangYuan = u.ar_role === 'user';
       if (canManage || isBaoZhangYuan) acts.push('<a data-act="edit" data-id="' + u.id + '">编辑</a>');
-      // 删除：超级管理员可删除自己以外任何账号；普通管理员仅可删报账员
-      const canDelete = (Auth.isSuperAdmin && !isSelf) || (!Auth.isSuperAdmin && isBaoZhangYuan);
+      // 删除：超级管理员可删除自己以外任何账号；普通管理员仅可删报账员；主管理员受保护不可删
+      const canDelete = (Auth.isSuperAdmin && !isSelf && !u.ar_protected) || (!Auth.isSuperAdmin && isBaoZhangYuan);
       if (canDelete) acts.push('<a class="link-danger" data-act="del" data-id="' + u.id + '">删除</a>');
       return `<tr data-id="${u.id}" class="${u.ar_super_admin ? 'row-admin' : ''}">
-        <td style="min-width:130px">${Utils.escapeHtml(u.full_name || '（未命名）')}${isSelf ? ' <span class="tag tag-blue">我</span>' : ''}</td>
+        <td style="min-width:130px">${Utils.escapeHtml(u.full_name || '（未命名）')}${isSelf ? ' <span class="tag tag-blue">我</span>' : ''}${u.ar_protected ? ' <span class="tag tag-red" title="不可被删除或降级">主管理员</span>' : ''}</td>
         <td style="min-width:180px">${Utils.escapeHtml(u.email || '')}</td>
         <td style="min-width:100px">${Utils.escapeHtml(dept)}</td>
         <td style="min-width:110px">${Utils.escapeHtml(u.phone || '')}</td>
