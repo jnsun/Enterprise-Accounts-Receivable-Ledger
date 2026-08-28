@@ -103,7 +103,7 @@ ALTER TABLE public.ar_users ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "ar_users_select" ON public.ar_users;
 CREATE POLICY "ar_users_select" ON public.ar_users
   FOR SELECT TO authenticated USING (
-    user_id = auth.uid() OR public.ar_is_super_admin()
+    user_id = auth.uid() OR public.ar_is_admin()
   );
 
 -- --------------------------------------------------------------------------
@@ -272,6 +272,62 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.ar_create_user(TEXT,TEXT,TEXT,TEXT,UUID,TEXT,JSONB) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ar_update_user(UUID,TEXT,TEXT,UUID,TEXT,TEXT,JSONB) TO authenticated;
+
+-- 4.4 删除账号
+--     超级管理员：可删除除自己以外的任何账号
+--     普通管理员：仅可删除报账员（ar_role='user'）
+--     行为：从 ar_users / ar_user_perms 移除（收回台账全部访问）；
+--           若该账号在月报系统无任何身份（无部门、非管理员），连登录账号
+--           一并删除；否则保留登录账号供月报系统继续使用。
+CREATE OR REPLACE FUNCTION public.ar_delete_user(p_user_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_caller_super BOOLEAN := public.ar_is_super_admin();
+  v_target       public.ar_users;
+  v_mr           public.profiles;
+BEGIN
+  IF NOT public.ar_is_admin() THEN
+    RAISE EXCEPTION '只有管理员才能删除账号';
+  END IF;
+  IF p_user_id IS NULL THEN
+    RAISE EXCEPTION '缺少用户';
+  END IF;
+  IF p_user_id = auth.uid() THEN
+    RAISE EXCEPTION '不能删除自己的账号';
+  END IF;
+
+  SELECT * INTO v_target FROM public.ar_users WHERE user_id = p_user_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '用户不存在';
+  END IF;
+
+  IF NOT v_caller_super THEN
+    -- 普通管理员：只能删报账员
+    IF v_target.ar_role <> 'user' THEN
+      RAISE EXCEPTION '普通管理员只能删除报账员账号';
+    END IF;
+  END IF;
+
+  -- 判断该登录账号在月报系统是否有身份
+  SELECT * INTO v_mr FROM public.profiles WHERE id = p_user_id;
+  IF FOUND AND (v_mr.role = 'admin' OR v_mr.is_super_admin = TRUE OR v_mr.department_id IS NOT NULL) THEN
+    -- 月报在用：保留登录账号，仅收回台账访问
+    DELETE FROM public.ar_user_perms WHERE user_id = p_user_id;
+    DELETE FROM public.ar_users WHERE user_id = p_user_id;
+    RETURN jsonb_build_object('id', p_user_id, 'auth_deleted', FALSE);
+  ELSE
+    -- 纯台账账号（含从未用于月报的）：连登录账号一起删除（级联清理 profiles/权限）
+    DELETE FROM auth.users WHERE id = p_user_id;
+    RETURN jsonb_build_object('id', p_user_id, 'auth_deleted', TRUE);
+  END IF;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.ar_delete_user(UUID) TO authenticated;
 
 -- --------------------------------------------------------------------------
 -- 6. 设置第一个台账超级管理员（首次执行后手动跑一次，换成实际邮箱）：
