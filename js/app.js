@@ -103,7 +103,8 @@ const App = {
       await Ledger.init();
       await Ledger.load();
       Ledger.render();
-      if (Auth.isAdmin) { Admin.load(); Admin.loadSettings(); }
+      if (Auth.isSuperAdmin) Admin.load();
+      if (Auth.isAdmin) Admin.loadSettings();
       if (Auth.can('delete') || Auth.can('import')) Batches.load();
     })();
   },
@@ -113,7 +114,7 @@ const App = {
     const items = [{ key: 'ledger', label: '台账总览', icon: '▤', show: Auth.can('view') || Auth.can('view_all') || Auth.isAdmin }];
     if (Auth.can('import')) items.push({ key: 'import-guide', label: 'Excel 导入', icon: '⇪', show: true });
     if (Auth.can('delete') || Auth.can('import')) items.push({ key: 'batches', label: '导入批次管理', icon: '☰', show: true });
-    if (Auth.isAdmin) items.push({ key: 'admin', label: '用户权限', icon: '⚿', show: true });
+    if (Auth.isSuperAdmin) items.push({ key: 'admin', label: '用户管理', icon: '⚿', show: true });
     if (Auth.isAdmin) items.push({ key: 'settings', label: '系统设置', icon: '⚙', show: true });
     // 无任何可见权限的部门用户也允许看总览（受 RLS 限制可能为空）
     nav.innerHTML = items.filter(i => i.show).map(i => `
@@ -126,7 +127,9 @@ const App = {
     list.innerHTML = PERM_DEFS.map(p => {
       const ok = Auth.can(p.key);
       return `<li class="${ok ? 'on' : 'off'}"><span class="pm-icon">${ok ? '✓' : '✗'}</span>${p.label}</li>`;
-    }).join('') + `<li class="${Auth.isAdmin ? 'on' : 'off'}"><span class="pm-icon">${Auth.isAdmin ? '✓' : '✗'}</span>管理员（用户与设置）</li>`;
+    }).join('') + (Auth.isSuperAdmin
+      ? '<li class="on"><span class="pm-icon">✓</span>超级管理员（用户与设置）</li>'
+      : `<li class="${Auth.isAdmin ? 'on' : 'off'}"><span class="pm-icon">${Auth.isAdmin ? '✓' : '✗'}</span>管理员（全部台账权限）</li>`);
   },
 
   navigate(view) {
@@ -136,7 +139,7 @@ const App = {
       'ledger': '台账总览',
       'import-guide': 'Excel 导入',
       'batches': '导入批次管理',
-      'admin': '用户权限管理',
+      'admin': '用户管理',
       'settings': '系统设置',
     };
     document.getElementById('topbar-title').textContent = titles[view] || '';
