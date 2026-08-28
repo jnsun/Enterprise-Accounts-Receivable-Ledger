@@ -28,7 +28,7 @@ const App = {
           <h1 class="login-title">企业应收账款台账系统</h1>
           <p class="login-sub">多部门应用中心 · 请使用系统分配的账号登录</p>
           <div class="login-form">
-            <input class="ipt" id="login-id" placeholder="邮箱 / 手机号 / 部门名称 / 部门编码" autocomplete="username">
+            <input class="ipt" id="login-id" placeholder="邮箱 / 手机号" autocomplete="username">
             <input class="ipt" id="login-pwd" type="password" placeholder="密码" autocomplete="current-password">
             <button class="btn btn-primary btn-block" id="login-btn">登 录</button>
             <div id="login-error" class="editor-error hidden"></div>
@@ -64,7 +64,7 @@ const App = {
     const root = document.getElementById('root');
     const p = Auth.currentProfile;
     const au = Auth.arUser || {};
-    const deptName = (au.departments && au.departments.name) || (Auth.isAdmin ? '系统管理员' : '未分配部门');
+    const deptName = (au.ar_departments && au.ar_departments.name) || (Auth.isAdmin ? '系统管理员' : '未分配部门');
 
     root.innerHTML = `
       <div class="app-shell">
@@ -203,7 +203,9 @@ const App = {
       <div class="modal modal-sm">
         <div class="modal-header">修改密码 <span class="modal-close" data-act="close">×</span></div>
         <div class="modal-body">
-          <input class="ipt" id="pwd-new" type="password" placeholder="新密码（至少 6 位）">
+          <input class="ipt" id="pwd-new" type="password" placeholder="新密码">
+          <div class="pwd-meter"><div class="pwd-meter-bar" id="pwd-bar"></div></div>
+          <div class="pwd-hint" id="pwd-hint"></div>
           <input class="ipt" id="pwd-new2" type="password" placeholder="确认新密码" style="margin-top:8px">
           <div id="pwd-error" class="editor-error hidden"></div>
         </div>
@@ -214,12 +216,18 @@ const App = {
       </div>`;
     document.body.appendChild(el);
     el.querySelector('[data-act="close"]').addEventListener('click', () => el.remove());
-    el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+    Utils.bindMaskClose(el, () => el.remove());
+    Utils.bindPwdMeter(el.querySelector('#pwd-new'), el.querySelector('#pwd-bar'), el.querySelector('#pwd-hint'));
     el.querySelector('[data-act="ok"]').addEventListener('click', async () => {
       const p1 = el.querySelector('#pwd-new').value, p2 = el.querySelector('#pwd-new2').value;
       const errBox = el.querySelector('#pwd-error');
       errBox.classList.add('hidden');
       if (p1 !== p2) { errBox.textContent = '两次输入的密码不一致'; errBox.classList.remove('hidden'); return; }
+      if (!Utils.pwdValid(p1)) {
+        errBox.textContent = '密码须至少 8 位，且同时包含大写字母、小写字母、数字和符号';
+        errBox.classList.remove('hidden');
+        return;
+      }
       const res = await Auth.changePassword(p1);
       if (!res.success) { errBox.textContent = res.error; errBox.classList.remove('hidden'); return; }
       el.remove();
