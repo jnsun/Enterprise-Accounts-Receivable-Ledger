@@ -6,7 +6,7 @@
  *           ANON_KEY，或部署脚本打印的密钥卡）。切勿填 SERVICE_ROLE_KEY！
  */
 const SUPABASE_URL = 'http://140.143.247.55';
-const SUPABASE_ANON_KEY = 'YOUR_SELFHOSTED_ANON_KEY';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJyb2xlIjogImFub24iLCAiaXNzIjogInN1cGFiYXNlIiwgImlhdCI6IDE3ODc4MjUwOTcsICJleHAiOiAyMTAzMTg1MDk3fQ.oLrMA4v0fqNVDRwPsYuFnOzoWtZbwJtVqHvt4_ILkDw';
 
 /** 全局 Supabase 客户端实例（由本文件底部初始化） */
 let sb = null;
