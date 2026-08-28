@@ -39,24 +39,18 @@
 
 ## 部署
 
-### 1. 数据库初始化（腾讯云自部署 Supabase，独立实例）
+### 1. 数据库（腾讯云自托管 Supabase · 与月报/证照系统共用实例）
 
-1. 浏览器打开 Supabase Studio（通常为 `http://服务器IP:8000`）；
-2. 左侧 **SQL Editor** → **New query** → 将 `sql/schema.sql` 全部内容粘贴 → **Run**；
-3. 脚本自包含（含部门表 / 用户档案 / 权限函数 / RLS），幂等可重复执行；
-4. **创建管理员**：Studio → **Authentication → Users → Add user**（填邮箱、密码，勾选 Auto Confirm），再到 SQL Editor 执行：
+1. 数据库为**共用实例版**：只建台账自己的 `ar_` 前缀表，账号体系（departments / profiles / is_admin / 登录标识解析）复用月报系统已有对象，零改动、零冲突；
+2. Supabase Studio 用 SSH 隧道访问（`ssh -L 3000:127.0.0.1:3000 ubuntu@服务器IP` → 浏览器打开 `http://127.0.0.1:3000`），左侧 **SQL Editor** → 粘贴 `sql/schema.sql` 全部内容 → **Run**（幂等可重复执行）；
+3. **管理员**：月报系统里的管理员（profiles.role='admin'）自动拥有台账全部权限，无需另建账号；普通用户先在月报系统建账号，再到台账「用户权限」页逐人开放 7 项权限。
 
-```sql
-UPDATE public.profiles SET role = 'admin', full_name = '管理员'
-WHERE id = (SELECT id FROM auth.users WHERE email = '你的管理员邮箱');
-```
-
-> 本系统为**独立数据存储**：所有表均以 `ar_` 前缀，账号体系（departments / profiles）也独立，与安全生产管理系统互不依赖、互不影响。
+> `sql/schema-standalone.sql` 是早期"全新独立实例"版备份，仅在单独新建 Supabase 实例时使用。
 
 ### 2. 前端配置
 
-编辑 `js/config.js`，填入自部署 Supabase 的 `SUPABASE_URL`（如 `http://服务器IP:8000`）与 `SUPABASE_ANON_KEY`（服务器 docker/.env 中的 ANON_KEY，或 Studio → Settings → API 的 anon public key）。
+编辑 `js/config.js`：`SUPABASE_URL` 填 `http://服务器IP`（自托管同源反代地址），`SUPABASE_ANON_KEY` 填自托管部署时签发的新 anon key（服务器 supabase/docker/.env 的 ANON_KEY，或部署时打印的密钥卡）。
 
 ### 3. 发布
 
-任意静态托管均可（GitHub Pages / Nginx / Caddy）。本仓库已开启 GitHub Pages 试运行；正式上线时将整个目录上传至腾讯云服务器，用 Nginx 托管静态文件并指向自部署 Supabase 即可。
+任意静态托管均可。**正式环境建议**：与月报系统一致，前端放腾讯云服务器 Nginx 同源（80 端口），`SUPABASE_URL=http://服务器IP`，前后端同源无跨域/混合内容问题。GitHub Pages（HTTPS）试运行时因混合内容限制无法调用 HTTP 接口，仅可本地 `http://localhost` 打开页面预览界面。
