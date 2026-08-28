@@ -8,6 +8,8 @@ const Auth = {
 
   currentUser: null,
   currentProfile: null,
+  /** 台账用户记录（ar_users 表，独立于月报 profiles） */
+  arUser: null,
   /** 当前用户权限对象 { view: true, ... }；管理员为全部 true */
   perms: {},
   isAdmin: false,
@@ -40,11 +42,15 @@ const Auth = {
     return { profile: data, error: null };
   },
 
-  /** 加载当前用户权限（台账独立角色体系，与月报系统互不影响） */
+  /** 加载当前用户权限（台账用户存于独立 ar_users 表，与月报系统隔离） */
   async loadPerms() {
-    const p = this.currentProfile;
-    this.isSuperAdmin = !!(p && p.ar_super_admin === true);
-    this.isAdmin = !!(p && (p.ar_role === 'admin' || this.isSuperAdmin));
+    const { data: arUser } = await sb.from('ar_users')
+      .select('*, departments(name)')
+      .eq('user_id', this.currentUser.id)
+      .maybeSingle();
+    this.arUser = arUser || null;
+    this.isSuperAdmin = !!(arUser && arUser.ar_super_admin === true);
+    this.isAdmin = !!(arUser && (arUser.ar_role === 'admin' || this.isSuperAdmin));
     this.perms = {};
     if (this.isAdmin) {
       PERM_DEFS.forEach(p => { this.perms[p.key] = true; });
@@ -128,5 +134,6 @@ const Auth = {
     this.perms = {};
     this.isAdmin = false;
     this.isSuperAdmin = false;
+    this.arUser = null;
   },
 };
