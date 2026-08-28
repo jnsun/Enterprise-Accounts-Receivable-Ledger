@@ -311,6 +311,20 @@ th.sorted { color: var(--primary); }
 }
 .perm-toggle input { accent-color: var(--primary); cursor: pointer; }
 
+/* 密码强度条 */
+.pwd-meter { height: 6px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.pwd-meter-bar { height: 100%; width: 0; background: #e5e7eb; border-radius: 4px; transition: all .2s; }
+.pwd-hint { font-size: 11.5px; color: var(--text-2); margin-top: 4px; min-height: 16px; }
+.pwd-hint.ok { color: var(--ok); }
+
+/* 部门管理 chips */
+.dept-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #f1f5f9; border-radius: 20px; padding: 5px 14px;
+  font-size: 12.5px; white-space: nowrap;
+}
+.dept-chip a { margin: 0 1px; font-size: 12px; }
+
 /* ---------- Toast ---------- */
 #toast-box {
   position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
