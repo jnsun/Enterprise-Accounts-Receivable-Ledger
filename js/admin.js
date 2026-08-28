@@ -13,13 +13,13 @@ const Admin = {
   users: [],   // [{id, email, full_name, phone, ar_role, ar_super_admin, department_id, departments, perms}]
 
   async load() {
-    const { data: profiles, error } = await sb.from('profiles')
-      .select('id, email, full_name, phone, ar_role, ar_super_admin, department_id, departments(name)')
+    const { data: profiles, error } = await sb.from('ar_users')
+      .select('user_id, email, full_name, phone, department_id, ar_role, ar_super_admin, departments(name)')
       .order('ar_super_admin', { ascending: false }).limit(500);
     if (error) { Utils.toast('用户列表加载失败：' + error.message, 'error'); return; }
     const { data: permsRows } = await sb.from('ar_user_perms').select('user_id, perms');
     const permMap = new Map((permsRows || []).map(p => [p.user_id, p.perms || {}]));
-    this.users = (profiles || []).map(p => ({ ...p, perms: permMap.get(p.id) || {} }));
+    this.users = (profiles || []).map(p => ({ ...p, id: p.user_id, perms: permMap.get(p.user_id) || {} }));
     this.render();
   },
 
