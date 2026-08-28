@@ -286,6 +286,34 @@ $$;
 GRANT EXECUTE ON FUNCTION public.ar_create_user(TEXT,TEXT,TEXT,TEXT,UUID,TEXT,JSONB) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ar_update_user(UUID,TEXT,TEXT,UUID,TEXT,TEXT,JSONB) TO authenticated;
 
+-- 4.5 台账登录标识解析（手机号只查台账用户表，绝不解析到月报账号）
+CREATE OR REPLACE FUNCTION public.ar_resolve_login_identifier(p_identifier TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_id TEXT := trim(COALESCE(p_identifier, ''));
+BEGIN
+  IF v_id = '' THEN RETURN NULL; END IF;
+  -- 邮箱：直接返回
+  IF v_id ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN
+    RETURN jsonb_build_object('email', lower(v_id));
+  END IF;
+  -- 手机号：只匹配台账用户（ar_users.phone）
+  IF v_id ~ '^1[0-9]{10}$' THEN
+    RETURN (
+      SELECT jsonb_build_object('email', lower(email))
+      FROM public.ar_users WHERE phone = v_id LIMIT 1
+    );
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.ar_resolve_login_identifier(TEXT) TO anon, authenticated;
+
 -- 4.4 删除账号
 --     超级管理员：可删除除自己以外的任何账号
 --     普通管理员：仅可删除报账员（ar_role='user'）
