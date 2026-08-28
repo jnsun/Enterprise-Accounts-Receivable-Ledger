@@ -1,0 +1,11 @@
+# 需求文档与临时文件不入库
+企业应收账款台账系统业务需求.docx
+*.log
+.DS_Store
+Thumbs.db
+.workbuddy/
+
+# 二进制文件不入库：vendor 走 CDN 回退，导入模板由前端动态生成，正式部署时直接复制本地文件
+vendor/
+template/
+*.xlsx
