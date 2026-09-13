@@ -3,7 +3,7 @@
  */
 
 const App = {
-  currentView: 'ledger',
+  currentView: 'dashboard',
 
   /** 启动 */
   async boot() {
@@ -68,7 +68,7 @@ const App = {
 
     root.innerHTML = `
       <div class="app-shell">
-        <aside class="sidebar">
+        <aside class="sidebar" id="sidebar">
           <div class="side-brand">企业应收账款<br>台账系统</div>
           <nav class="side-nav" id="side-nav"></nav>
           <div class="side-perms">
@@ -76,9 +76,13 @@ const App = {
             <ul class="perm-list" id="perm-list"></ul>
           </div>
         </aside>
+        <div class="sidebar-mask" id="sidebar-mask"></div>
         <div class="app-main">
           <header class="topbar">
-            <div class="topbar-title" id="topbar-title">台账总览</div>
+            <div class="topbar-left">
+              <button class="menu-btn" id="menu-btn" aria-label="菜单">☰</button>
+              <div class="topbar-title" id="topbar-title">数据看板</div>
+            </div>
             <div class="topbar-user">
               <span class="user-dept">${Utils.escapeHtml(deptName)}</span>
               <span class="user-name">${Utils.escapeHtml(au.full_name || p.full_name || '用户')}</span>
@@ -87,7 +91,8 @@ const App = {
             </div>
           </header>
           <main class="page-container">
-            <section id="page-ledger" class="page"></section>
+            <section id="page-dashboard" class="page"></section>
+            <section id="page-ledger" class="page hidden"></section>
             <section id="page-import-guide" class="page hidden"></section>
             <section id="page-batches" class="page hidden"></section>
             <section id="page-admin" class="page hidden"></section>
@@ -101,9 +106,11 @@ const App = {
 
     // 首屏数据
     (async () => {
+      await ColPrefs.load(Auth.currentUser.id);   // 先载入本账号的列显示偏好
       await Ledger.init();
       await Ledger.load();
       Ledger.render();
+      Dashboard.render();                          // 数据看板首屏
       if (Auth.isSuperAdmin) Admin.load();
       if (Auth.isAdmin) Admin.loadSettings();
       if (Auth.can('delete') || Auth.can('import')) Batches.load();
@@ -112,7 +119,8 @@ const App = {
 
   renderSidebar() {
     const nav = document.getElementById('side-nav');
-    const items = [{ key: 'ledger', label: '台账总览', icon: '▤', show: Auth.can('view') || Auth.can('view_all') || Auth.isAdmin }];
+    const items = [{ key: 'dashboard', label: '数据看板', icon: '▦', show: Auth.can('view') || Auth.can('view_all') || Auth.isAdmin }];
+    items.push({ key: 'ledger', label: '台账总览', icon: '▤', show: Auth.can('view') || Auth.can('view_all') || Auth.isAdmin });
     if (Auth.can('import')) items.push({ key: 'import-guide', label: 'Excel 导入', icon: '⇪', show: true });
     if (Auth.can('delete') || Auth.can('import')) items.push({ key: 'batches', label: '导入批次管理', icon: '☰', show: true });
     if (Auth.isAdmin) items.push({ key: 'admin', label: '用户管理', icon: '⚿', show: true });
@@ -137,6 +145,7 @@ const App = {
     this.currentView = view;
     document.querySelectorAll('.page').forEach(pg => pg.classList.add('hidden'));
     const titles = {
+      'dashboard': '数据看板',
       'ledger': '台账总览',
       'import-guide': 'Excel 导入',
       'batches': '导入批次管理',
@@ -148,7 +157,9 @@ const App = {
 
     const page = document.getElementById('page-' + view);
     if (page) page.classList.remove('hidden');
+    this.closeSidebar();   // 移动端：切换视图后收起抽屉
 
+    if (view === 'dashboard') Dashboard.render();
     if (view === 'ledger') {
       if (!Ledger.rows.length) Ledger.reload(); else Ledger.render();
     }
@@ -156,6 +167,12 @@ const App = {
     if (view === 'batches') Batches.load();
     if (view === 'admin') Admin.load();
     if (view === 'settings') Admin.loadSettings();
+  },
+
+  /** 移动端侧边栏抽屉 */
+  closeSidebar() {
+    document.getElementById('sidebar')?.classList.remove('open');
+    document.getElementById('sidebar-mask')?.classList.remove('show');
   },
 
   /** 导入引导页（真正的导入入口在台账工具栏，也可从这里打开） */
@@ -167,7 +184,6 @@ const App = {
       <div class="guide-card">
         <ol class="guide-steps">
           <li>点击下方「下载模板」，参照模板整理 Excel 数据（也可直接使用自有表格，字段可在导入时映射）；</li>
-          <li>点击下方按钮选择 Excel 文件，系统将<b>自动匹配字段位置</b>；</li>
           <li>点击下方按钮选择 Excel 文件，系统将<b>自动匹配字段位置</b>；</li>
           <li>在映射页核对每列的对应关系，<b>可人工选择修改</b>；</li>
           <li>预览确认后导入，导入按批次记录，可在「导入批次管理」中整批或部分删除。</li>
@@ -184,6 +200,12 @@ const App = {
   },
 
   bindTopbar() {
+    document.getElementById('menu-btn')?.addEventListener('click', () => {
+      document.getElementById('sidebar').classList.toggle('open');
+      document.getElementById('sidebar-mask').classList.toggle('show');
+    });
+    document.getElementById('sidebar-mask')?.addEventListener('click', () => this.closeSidebar());
+
     document.querySelectorAll('.topbar-user [data-act]').forEach(b => b.addEventListener('click', async () => {
       if (b.dataset.act === 'logout') {
         await Auth.logout();
