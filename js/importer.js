@@ -1,19 +1,31 @@
 /**
- * importer.js - Excel 导入模块
+ * importer.js - Excel 导入模块（新指标体系 v3）
  * 流程：选择文件 -> 字段自动匹配（可人工调整映射）-> 预览确认 -> 分批写入
- * 支持按「合同编号」跳过重复或覆盖更新；支持按施工部门自动匹配数据归属部门。
+ *
+ * - 模板 28 列：序号 / 部门名称（自动归属）+ 台账字段；账内/账外应收为自动计算列，无需导入
+ * - 「部门名称」列自动匹配数据归属部门（也可在导入时统一指定）
+ * - 支持按「合同编号」跳过重复或覆盖更新
  */
+
+/* 可映射的导入目标：台账字段 + 虚拟「部门名称」（归属部门） */
+const IMPORT_TARGETS = [
+  { key: 'department', label: '部门名称（归属部门）', aliases: ['部门名称', '部门', '施工部门'], virtual: true },
+  ...FIELD_DEFS.map(f => ({ key: f.key, label: f.label, aliases: f.aliases || [f.label] })),
+];
 
 const Importer = {
 
-  /** 前端动态生成导入模板（与字段定义自动同步） */
+  /** 前端动态生成导入模板（与字段定义自动同步，含示例行） */
   downloadTemplate() {
-    const header = FIELD_DEFS.map(f => f.label);
-    const sample = ['WH24-001', '某某某地质勘查项目二维地震勘探技术服务（示例行，导入前请删除）',
-      100, 100, 50, 30, 70, 0, 70, '某某煤业有限公司', '本单位名称', '2024-01-01', '2024-06-30',
-      '施工中', '按进度付款', '物探一公司', '技术服务', '地质勘查', 20, '2025-06-30', '已电话催收，承诺下月回款'];
+    const header = ['序号', '部门名称', ...FIELD_DEFS.map(f => f.label)];
+    const sample = ['1', '物探一公司',
+      'WH24-001', '某某煤业有限公司', '国有企业', '某某某地质勘查项目二维地震勘探技术服务（示例行，导入前请删除）',
+      '技术服务', '地质勘查', '完工', '合同金额', '2024-07-01',
+      100, 80, 50, 10,
+      '正常', '张三', '2025-06-30', '电话', '承认欠款，但资金紧张', '已发送第二次催款函', '跟踪付款进度',
+      '示例备注'];
     const ws = XLSX.utils.aoa_to_sheet([header, sample]);
-    ws['!cols'] = header.map(h => ({ wch: Math.max(12, h.length * 2 + 4) }));
+    ws['!cols'] = header.map(h => ({ wch: Math.max(12, h.length * 2 + 2) }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '导入模板');
     XLSX.writeFile(wb, '应收账款导入模板.xlsx');
@@ -23,8 +35,8 @@ const Importer = {
   sheetRows: null,    // 二维数组
   headers: [],        // 表头行
   mapping: [],        // 每列 -> 目标字段 key 或 ''
-  targetDept: 'auto', // auto | 部门id
-  dupMode: 'skip',    // skip | overwrite
+  targetDept: 'auto', // auto | 部门id | none
+  dupMode: 'skip',    // skip | overwrite | insert
   existingNos: new Map(), // 合同编号 -> 行（覆盖更新用）
 
   open() {
@@ -54,7 +66,7 @@ const Importer = {
   /* ---------- 第 1 步：选择文件 ---------- */
 
   renderStepFile() {
-    const deptOpts = ['<option value="auto">按「施工部门」自动匹配</option>',
+    const deptOpts = ['<option value="auto">按「部门名称」列自动匹配</option>',
       ...Ledger.departments.map(d => `<option value="${d.id}">${Utils.escapeHtml(d.name)}</option>`),
       '<option value="none">不指定（仅管理员可见）</option>'].join('');
     document.getElementById('import-body').innerHTML = `
@@ -62,7 +74,7 @@ const Importer = {
         <div class="file-pick" id="file-pick">
           <div class="fp-icon">⇪</div>
           <div>点击选择或拖拽 Excel 文件到此处</div>
-          <div class="muted">支持 .xlsx / .xls · 建议使用标准模板（<a id="tpl-download">下载模板</a>）</div>
+          <div class="muted">支持 .xlsx / .xls · 建议使用标准模板（<a id="tpl-download">下载模板</a>）· 账内/账外应收自动计算，无需导入</div>
         </div>
         <input type="file" id="import-file" accept=".xlsx,.xls" class="hidden">
         <div class="form-grid import-opts">
@@ -124,7 +136,7 @@ const Importer = {
     const norm = s => String(s || '').replace(/[\s()（）/／]/g, '').toLowerCase();
     // 找表头行：前 10 行内与已知字段匹配数最多的一行
     let best = { rowIdx: 0, score: -1 };
-    const known = new Set(FIELD_DEFS.flatMap(f => [f.label, ...f.aliases]).map(norm));
+    const known = new Set(IMPORT_TARGETS.flatMap(f => [f.label, ...f.aliases]).map(norm));
     for (let i = 0; i < Math.min(10, this.sheetRows.length); i++) {
       const row = this.sheetRows[i] || [];
       let score = 0;
@@ -136,7 +148,7 @@ const Importer = {
 
     // 自动匹配：表头精确 = label > alias > 归一化匹配
     const byExact = new Map(), byAlias = new Map(), byNorm = new Map();
-    FIELD_DEFS.forEach(f => {
+    IMPORT_TARGETS.forEach(f => {
       byExact.set(f.label, f.key);
       f.aliases.forEach(a => { if (!byAlias.has(a)) byAlias.set(a, f.key); byNorm.set(norm(a), f.key); });
       byNorm.set(norm(f.label), f.key);
@@ -150,12 +162,10 @@ const Importer = {
   },
 
   renderStepMapping() {
-    const used = {};
     const fieldOptions = key => {
       const opts = ['<option value="">— 忽略该列 —</option>'];
-      FIELD_DEFS.forEach(f => {
-        const disabled = used[f.key] && f.key !== key ? 'disabled' : '';
-        opts.push(`<option value="${f.key}" ${f.key === key ? 'selected' : ''} ${disabled}>${f.label}</option>`);
+      IMPORT_TARGETS.forEach(f => {
+        opts.push(`<option value="${f.key}" ${f.key === key ? 'selected' : ''}>${f.label}</option>`);
       });
       return opts.join('');
     };
@@ -206,7 +216,9 @@ const Importer = {
   buildPayload(colIdx, raw) {
     const key = this.mapping[colIdx];
     if (!key) return {};
+    if (key === 'department') return { __dept_name: raw === null || raw === undefined ? null : String(raw).trim() || null };
     const f = FIELD_DEFS.find(x => x.key === key);
+    if (!f) return {};
     const row = {};
     if (f.type === 'money') row[key] = Utils.parseMoney(raw);
     else if (f.type === 'date') row[key] = Utils.parseExcelDate(raw);
@@ -217,20 +229,20 @@ const Importer = {
   async renderStepPreview() {
     const errBox = document.getElementById('import-error');
     errBox.classList.add('hidden');
-    // 预览前 5 行
     const previewRows = this.dataRows.slice(0, 5).map(r =>
       this.headers.reduce((acc, _h, i) => Object.assign(acc, this.buildPayload(i, r[i])), {}));
     const shownFields = [...new Set(this.mapping.filter(Boolean))];
 
+    const labelOf = k => (IMPORT_TARGETS.find(f => f.key === k) || {}).label || k;
     const previewHtml = `
       <div class="table-wrap" style="max-height:220px">
         <table class="ledger-table">
-          <thead><tr>${shownFields.map(k => `<th>${FIELD_DEFS.find(f => f.key === k).label}</th>`).join('')}</tr></thead>
+          <thead><tr>${shownFields.map(k => `<th>${labelOf(k)}</th>`).join('')}</tr></thead>
           <tbody>${previewRows.map(r => `<tr>${shownFields.map(k => {
-            const f = FIELD_DEFS.find(x => x.key === k);
             let v = r[k]; if (v === null || v === undefined) v = '';
-            if (f.type === 'money') return `<td class="ta-r td-money">${Utils.fmtMoney(v)}</td>`;
-            if (f.key === 'project_name') return `<td class="td-name">${Utils.escapeHtml(Utils.clampName(v))}</td>`;
+            const f = FIELD_DEFS.find(x => x.key === k);
+            if (f && f.type === 'money') return `<td class="ta-r td-money">${Utils.fmtMoney(v)}</td>`;
+            if (f && f.key === 'project_name') return `<td class="td-name">${Utils.escapeHtml(Utils.clampName(v))}</td>`;
             return `<td>${Utils.escapeHtml(String(v))}</td>`;
           }).join('')}</tr>`).join('')}</tbody>
         </table>
@@ -258,14 +270,12 @@ const Importer = {
     errBox.classList.add('hidden');
     btn.disabled = true; btn.textContent = '导入中…';
 
-    // 读取选项
     const deptSel = document.getElementById('imp-dept');
     const dupSel = document.getElementById('imp-dup');
     if (deptSel) this.targetDept = deptSel.value;
     if (dupSel) this.dupMode = dupSel.value;
 
     try {
-      // 归属部门解析
       let deptId = null;
       let autoMatch = false;
       if (this.targetDept === 'auto') autoMatch = true;
@@ -290,10 +300,15 @@ const Importer = {
       let skipped = 0;
       this.dataRows.forEach(raw => {
         const obj = this.headers.reduce((acc, _h, i) => Object.assign(acc, this.buildPayload(i, raw[i])), {});
+        const deptNameFromCol = obj.__dept_name;   // 「部门名称」列
+        delete obj.__dept_name;
         if (!obj.contract_no && !obj.project_name) { skipped++; return; } // 空行跳过
         obj.batch_id = batch.id;
-        if (autoMatch) obj.department_id = (obj.dept_name && deptByName.get(obj.dept_name)) || null;
-        else obj.department_id = deptId;
+        if (autoMatch) {
+          obj.department_id = (deptNameFromCol && deptByName.get(deptNameFromCol)) || null;
+        } else {
+          obj.department_id = deptId;
+        }
 
         const no = obj.contract_no ? String(obj.contract_no).trim() : null;
         if (no && this.existingNos.has(no)) {

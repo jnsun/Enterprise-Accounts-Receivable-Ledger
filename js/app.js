@@ -124,6 +124,7 @@ const App = {
     if (Auth.can('import')) items.push({ key: 'import-guide', label: 'Excel 导入', icon: '⇪', show: true });
     if (Auth.can('delete') || Auth.can('import')) items.push({ key: 'batches', label: '导入批次管理', icon: '☰', show: true });
     if (Auth.isAdmin) items.push({ key: 'admin', label: '用户管理', icon: '⚿', show: true });
+    if (Auth.isAdmin) items.push({ key: 'dict', label: '选项管理', icon: '◈', show: true });
     if (Auth.isAdmin) items.push({ key: 'settings', label: '系统设置', icon: '⚙', show: true });
     // 无任何可见权限的部门用户也允许看总览（受 RLS 限制可能为空）
     nav.innerHTML = items.filter(i => i.show).map(i => `
@@ -166,6 +167,7 @@ const App = {
     if (view === 'import-guide') this.renderImportGuide();
     if (view === 'batches') Batches.load();
     if (view === 'admin') Admin.load();
+    if (view === 'dict') DictAdmin.load();
     if (view === 'settings') Admin.loadSettings();
   },
 
