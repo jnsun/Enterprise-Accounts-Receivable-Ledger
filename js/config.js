@@ -1,13 +1,17 @@
 /**
- * config.js - Supabase 连接配置（腾讯云自托管实例，与月报/证照系统共用）
+ * config.js - Supabase 连接配置
  *
- * 2026-09-13：服务器 80 端口已全局 301 到 https://www.safety.sx.cn（培训平台上线），
- * 原 http://140.143.247.55 会被跳转导致 fetch 跨域断裂（登录 Failed to fetch）。
- * 改为域名同源地址。⚠️ 前提：服务器 nginx 需恢复 /auth/v1、/rest/v1 → Kong:8000
- * 的代理（见 .workbuddy/fix-auth-routing.sh，跑一次即可）。
+ * 2026-09-14：切换到独立的 Supabase 云端项目（与安全生产/月报/证照系统
+ * 完全隔离的全新实例）。此前指向腾讯云自托管实例（https://www.safety.sx.cn），
+ * 如需回退，将下面两行改回旧值即可：
+ *   旧 URL: https://www.safety.sx.cn
+ *   旧 KEY: eyJhbGciOiJIUzI1NiIs...（JWT 格式 anon key，见 git 历史此文件上一版）
+ *
+ * 说明：新项目使用 Supabase 新版密钥（sb_publishable_ 开头，即"发布密钥"，
+ * 等价于旧版 anon key，可安全地放进前端代码）。
  */
-const SUPABASE_URL = 'https://www.safety.sx.cn';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg3OTIzMTgyLCJleHAiOjIxMDMyODMxODJ9.KnS6ejpGHGxOyET6KQdjwhFzWBcGNpHfoLKOfh-dTXU';
+const SUPABASE_URL = 'https://bttnxyexkbsskmqttbzi.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_IHE3a0i6REFt9NOY5d7QhQ_mbgcfTQO';
 
 /** 全局 Supabase 客户端实例（由本文件底部初始化） */
 let sb = null;
@@ -21,7 +25,7 @@ let sb = null;
       if (root && !root.childElementCount) {
         root.innerHTML =
           '<div class="boot-error">尚未配置 Supabase 密钥：<br>请编辑 <b>js/config.js</b>，' +
-          '填入腾讯云自托管 Supabase 的 ANON_KEY（SUPABASE_ANON_KEY）。</div>';
+          '填入 Supabase 项目的发布密钥（SUPABASE_ANON_KEY）。</div>';
       }
     });
     return;

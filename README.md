@@ -42,10 +42,12 @@
 │   ├── dictadmin.js        # 选项管理（财务维护下拉选项）
 │   └── app.js              # 应用入口
 ├── sql/
-│   ├── schema.sql                       # 初始建表（v1 口径）
-│   ├── ar-users-v2.sql                  # 独立账号体系 ar_users
-│   ├── ar-user-management.sql           # 用户管理 RPC / RLS
-│   └── upgrade-v3-indicators.sql        # ★ v3 升级：新列 + 选项字典 + 附件 + 字段保护
+│   ├── init-new-instance.sql            # ★ 全新 Supabase 项目一键初始化（推荐）
+│   ├── schema-standalone.sql            # 基础建表（departments/profiles/ar_ 核心表）
+│   ├── schema.sql                       # v1 共用实例版（历史存档，勿用于新库）
+│   ├── ar-users-v2.sql                  # 独立账号体系 ar_users（覆盖前者同名函数）
+│   ├── ar-user-management.sql           # 旧版用户管理（已被 ar-users-v2 取代，历史存档）
+│   └── upgrade-v3-indicators.sql        # v3 升级：新列 + 选项字典 + 附件 + 字段保护
 └── vendor/                 # supabase-js / SheetJS（gitignore，正式部署拷贝到服务器；
                             # 缺失时自动回退 jsDelivr CDN）
 ```
