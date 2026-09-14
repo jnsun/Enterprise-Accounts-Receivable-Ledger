@@ -5,10 +5,10 @@
 --
 -- 本文件 = schema-standalone.sql + ar-users-v2.sql + upgrade-v3-indicators.sql
 -- 按依赖顺序拼接（三者单独更新时需同步本文件，或改为按顺序分别执行）。
+-- 全部语句幂等：中断后修复可整体重跑，已建对象不受影响。
 --
 -- 使用方法：
 --   Supabase Studio → SQL Editor → New query → 粘贴本文件全部内容 → Run。
---   幂等可重复执行（个别 NOTICE 可忽略）。
 --
 -- 执行后必须完成两步（见文件末尾注释）：
 --   ① Authentication → Users → Add user 创建首个登录账号；
@@ -554,9 +554,11 @@ RETURNS BOOLEAN AS $$
       WHERE user_id = auth.uid() AND ar_role = 'admin'
     )
     OR COALESCE(
-         (SELECT CASE WHEN ar_role = 'disabled' THEN FALSE
-                      ELSE (perms ->> p_key)::boolean END
-          FROM public.ar_user_perms WHERE user_id = auth.uid()),
+         (SELECT CASE WHEN u.ar_role = 'disabled' THEN FALSE
+                      ELSE (p.perms ->> p_key)::boolean END
+            FROM public.ar_users u
+            JOIN public.ar_user_perms p ON p.user_id = u.user_id
+           WHERE u.user_id = auth.uid()),
          FALSE);
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
 

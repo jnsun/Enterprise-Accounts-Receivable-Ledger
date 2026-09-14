@@ -81,9 +81,11 @@ RETURNS BOOLEAN AS $$
       WHERE user_id = auth.uid() AND ar_role = 'admin'
     )
     OR COALESCE(
-         (SELECT CASE WHEN ar_role = 'disabled' THEN FALSE
-                      ELSE (perms ->> p_key)::boolean END
-          FROM public.ar_user_perms WHERE user_id = auth.uid()),
+         (SELECT CASE WHEN u.ar_role = 'disabled' THEN FALSE
+                      ELSE (p.perms ->> p_key)::boolean END
+            FROM public.ar_users u
+            JOIN public.ar_user_perms p ON p.user_id = u.user_id
+           WHERE u.user_id = auth.uid()),
          FALSE);
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
 
