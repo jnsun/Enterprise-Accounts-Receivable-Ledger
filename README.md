@@ -47,10 +47,12 @@
 │   └── app.js              # 应用入口
 ├── docs/
 │   ├── adr/                # 架构决策记录（0001 合同粒度 / 0002 人工债权状态 / 0003 合同额带入决算）
-│   └── preview/            # 看板视觉预览（自包含 HTML，模拟数据，不需登录）
+│   └── preview/            # 视觉预览（自包含 HTML，模拟数据，不需登录）
 │       ├── mock-data.js            # 预览用模拟数据与最小桩件
-│       ├── build-dashboard-preview.js  # 生成器：内联 CSS/JS → 单文件 HTML
-│       └── dashboard-preview.html      # 产物（修改样式后重新运行生成器）
+│       ├── build-dashboard-preview.js  # 生成器：内联 CSS/JS → 看板单文件 HTML
+│       ├── dashboard-preview.html      # 产物（修改样式后重新运行生成器）
+│       ├── build-admin-preview.js      # 生成器：内联 CSS/JS → 用户管理单文件 HTML
+│       └── admin-preview.html          # 产物（两个视角 + #perm-modal 打开编辑弹窗）
 ├── sql/
 │   ├── init-new-instance.sql            # ★ 全新 Supabase 项目一键初始化（推荐，含回款明细）
 │   ├── schema-standalone.sql            # 基础建表（departments/profiles/ar_ 核心表）
@@ -66,13 +68,18 @@
                             # 缺失时自动回退 jsDelivr CDN）
 ```
 
-### 看板视觉预览（改完样式后自查）
+### 看板 / 用户管理视觉预览（改完样式后自查）
 
 ```bash
 node docs/preview/build-dashboard-preview.js     # 重新生成 docs/preview/dashboard-preview.html
+node docs/preview/build-admin-preview.js         # 重新生成 docs/preview/admin-preview.html
 ```
 
-产物是**自包含单文件**（内联 `css/style.css` + `js/utils.js` + `js/dashboard.js` + 模拟数据），双击即可打开：无需登录、不连数据库，用来核对版面与字号。**修改样式或看板代码后要重新跑一次**生成器，预览页才会同步。
+产物是**自包含单文件**（内联 `css/style.css` + 对应 JS + 模拟数据），双击即可打开：无需登录、不连数据库，用来核对版面与字号。**修改样式或对应页面代码后要重新跑一次**生成器，预览页才会同步。
+
+用户管理预览会渲染两个视角（超级管理员 / 普通管理员），地址后加 `#perm-modal` 可直接打开编辑弹窗。
+
+> 表格布局铁律：**不要给 `<td>` 直接写 `display:flex/grid`**。td 一旦退出表格布局，匿名单元格包裹会让表头与表体的列边界错位、单元格之间出现无色缝（看起来像"奇怪的方块 + 没对齐的线条"）。正确做法是 td 内再套一个 `<div>` 承载 flex/grid。
 
 ### 已运行 v3 的库升级到 v3.1（回款明细）
 

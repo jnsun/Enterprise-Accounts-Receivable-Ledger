@@ -1,3 +1,10 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>用户管理预览 · 企业应收账款台账系统</title>
+<style>
 /* ==========================================================================
    企业应收账款台账系统 · 样式表
    设计语言：账簿工业风 Ledger Industrial（精确 / 稳重 / 克制）
@@ -1110,3 +1117,999 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
     scroll-behavior: auto !important;
   }
 }
+
+/* —— 预览页专属，不属于产品样式 —— */
+body { margin: 0; padding: 18px 20px 60px; background: var(--surface-2); }
+.preview-note {
+  margin-bottom: 16px; padding: 8px 14px; font-size: 12px; line-height: 1.7;
+  background: oklch(96% 0.03 258); color: oklch(38% 0.09 258);
+  border: 1px solid oklch(86% 0.065 258); border-radius: 6px;
+}
+.preview-note b { font-weight: 600; }
+.preview-h { margin: 26px 0 10px; font-size: 13px; font-weight: 600; color: var(--ink-600); }
+.preview-h:first-of-type { margin-top: 0; }
+#page-admin { display: none; }
+</style>
+</head>
+<body>
+<div class="preview-note">
+  <b>用户管理页视觉预览</b> · 模拟账号数据，不连数据库 ·
+  内容与真实系统同源：<code>css/style.css</code> + <code>js/admin.js</code> ·
+  本页渲染两个视角：超级管理员看到的（首列带 <b>🔒 受保护</b> 标记）与普通管理员看到的。
+  <br>勾选任一权限复选框，该行底部的「保存权限」按钮应点亮并提示「有未保存的修改」。
+</div>
+<div id="page-admin"></div>
+<div class="preview-h">视角 A · 超级管理员（孙晋宁）</div>
+<div id="view-super"></div>
+<div class="preview-h">视角 B · 普通管理员（赵兵）</div>
+<div id="view-admin"></div>
+<script>/**
+ * fields.js - 台账字段定义（新指标体系 v3，依据《应收系统统计指标.xlsx》28 列）
+ *
+ * 台账表格 / 编辑表单 / Excel 导入映射 / 导出 共用。
+ *
+ * type: text | money | date | select | combo | textarea
+ *   - select: 下拉选择（dict 指定 ar_dict 类别；freeOther=true 时带「其他」自由填写）
+ *   - combo : 可输可选（datalist，dict 选项作建议，允许自由输入）
+ * width: 表格列宽（px）；money/date 列右对齐
+ * aliases: Excel 导入时用于自动匹配的候选表头名
+ * dict: 选项字典类别（ar_dict.category，选项可由财务管理员在「选项管理」页编辑）
+ * deptEditable: 实体部门（非管理员）可编辑（要求五：仅催收跟踪类字段）
+ *
+ * 自动计算口径（要求：账内应收 = 开票金额 − 到账金额；账外应收 = 决算金额 − 开票金额）：
+ *   receivable_internal / receivable_external / receivable_balance 均为虚拟计算列，不入库。
+ *
+ * 旧版字段（合同金额/开工完工日期/工程进度/付款节点/成本费用/应收合计/催收反馈等）
+ * 数据库保留、界面隐藏，需要时可随时恢复。
+ */
+
+const FIELD_DEFS = [
+  /* ---- 基本信息 ---- */
+  { key: 'contract_no',    label: '合同编号',     type: 'text',   width: 110, aliases: ['合同编号', '编号', '合同号'] },
+  { key: 'project_name',   label: '项目名称',     type: 'text',   width: 200, clamp: true, aliases: ['项目名称', '项目', '工程项目'] },
+  { key: 'owner_unit',     label: '客户名称',     type: 'text',   width: 170, aliases: ['客户名称', '甲方单位', '甲方', '建设单位'], datalist: true },
+  { key: 'client_attr',    label: '客户属性',     type: 'select', width: 96,  dict: 'client_attr', freeOther: true, aliases: ['客户属性'] },
+  { key: 'creditor_unit',  label: '单位',         type: 'combo',  width: 130, dict: 'unit', aliases: ['单位', '债权单位', '乙方单位'] },
+  { key: 'work_nature',    label: '工作性质',     type: 'combo',  width: 96,  dict: 'work_nature', aliases: ['工作性质', '性质'] },
+  { key: 'sector',         label: '八大板块',     type: 'combo',  width: 96,  dict: 'sector', aliases: ['八大板块', '板块'] },
+
+  /* ---- 状态与金额 ---- */
+  { key: 'project_status', label: '项目状态',     type: 'select', width: 88,  dict: 'project_status', freeOther: true,
+    deptEditable: true, aliases: ['项目状态', '工程进度'] },
+  { key: 'final_method',   label: '决算方式',     type: 'select', width: 92,  dict: 'final_method', freeOther: true,
+    deptEditable: true, aliases: ['决算方式'] },
+  { key: 'charge_date',    label: '最新挂账时间', type: 'date',   width: 108,
+    aliases: ['最新挂账时间', '挂账时间', '挂账日期'], note: '= 最近一笔开票日期，登记开票明细时自动维护' },
+  { key: 'final_amount',   label: '决算金额',     type: 'money',  width: 92,  aliases: ['决算金额'] },
+  { key: 'invoiced_amount',label: '开票金额',     type: 'money',  width: 92,  aliases: ['开票金额', '已开发票金额'] },
+  { key: 'received_amount',label: '到账金额',     type: 'money',  width: 92,  aliases: ['到账金额', '已到账金额', '已回款'] },
+  { key: 'writeoff_amount',label: '核销金额',     type: 'money',  width: 92,  aliases: ['核销金额', '核销'] },
+
+  /* ---- 债权与催收（实体部门可编辑区） ---- */
+  { key: 'debt_status',    label: '债权状态',     type: 'select', width: 88,  dict: 'debt_status', freeOther: true,
+    deptEditable: true, aliases: ['债权状态'] },
+  { key: 'collector',      label: '清收责任人',   type: 'text',   width: 100,
+    deptEditable: true, aliases: ['清收责任人', '责任人'] },
+  { key: 'dunning_date',   label: '最新催收时间', type: 'date',   width: 108,
+    deptEditable: true, aliases: ['最新催收时间', '催收时间', '催收/询证日期', '催收日期', '询证日期'] },
+  { key: 'comm_method',    label: '沟通方式',     type: 'select', width: 104, dict: 'comm_method', freeOther: true,
+    deptEditable: true, aliases: ['沟通方式'] },
+  { key: 'feedback',       label: '对方反馈',     type: 'select', width: 150, dict: 'feedback', freeOther: true,
+    deptEditable: true, aliases: ['对方反馈', '反馈'] },
+  { key: 'latest_progress',label: '最新进展',     type: 'select', width: 140, dict: 'progress_note', freeOther: true,
+    deptEditable: true, aliases: ['最新进展', '进展'] },
+  { key: 'next_plan',      label: '下一步计划',   type: 'select', width: 130, dict: 'next_plan', freeOther: true,
+    deptEditable: true, aliases: ['下一步计划', '计划'] },
+  { key: 'remark',         label: '备注',         type: 'textarea', width: 150, aliases: ['备注'] },
+];
+
+/* 自动计算列（不对应数据库字段，前端实时计算） */
+const COMPUTED_DEFS = [
+  { key: 'receivable_internal', label: '账内应收金额', type: 'money', width: 102, formula: '= 开票 − 到账' },
+  { key: 'receivable_external', label: '账外应收金额', type: 'money', width: 102, formula: '= 决算 − 开票' },
+  { key: 'receivable_balance',  label: '应收余额',     type: 'money', width: 96,  formula: '= 决算 − 到账 − 核销' },
+  { key: 'attach_summary',      label: '附件类别及数量', type: 'text',  width: 130 },
+];
+
+const ALL_FIELDS = FIELD_DEFS.map(f => f.key);
+
+const MONEY_KEYS = FIELD_DEFS.filter(f => f.type === 'money').map(f => f.key);
+
+/* 编辑表单分组（要求一：一个项目一个界面，按业务分区展示全部要素） */
+const FORM_GROUPS = [
+  { key: 'base',    label: '基本信息', fields: ['contract_no', 'project_name', 'owner_unit', 'client_attr', 'creditor_unit', 'work_nature', 'sector'] },
+  { key: 'finance', label: '状态与金额', fields: ['project_status', 'final_method', 'charge_date', 'final_amount', 'invoiced_amount', 'received_amount', 'writeoff_amount'] },
+  { key: 'dunning', label: '债权与催收', fields: ['debt_status', 'collector', 'dunning_date', 'comm_method', 'feedback', 'latest_progress', 'next_plan', 'remark'] },
+];
+
+/* 字典类别定义（「选项管理」页展示顺序与说明） */
+const DICT_CATEGORIES = [
+  { key: 'project_status',  label: '项目状态' },
+  { key: 'final_method',    label: '决算方式' },
+  { key: 'debt_status',     label: '债权状态' },
+  { key: 'client_attr',     label: '客户属性' },
+  { key: 'comm_method',     label: '沟通方式' },
+  { key: 'feedback',        label: '对方反馈' },
+  { key: 'progress_note',   label: '最新进展' },
+  { key: 'next_plan',       label: '下一步计划' },
+  { key: 'attach_category', label: '附件类别' },
+  { key: 'unit',            label: '单位（债权单位）' },
+  { key: 'work_nature',     label: '工作性质' },
+  { key: 'sector',          label: '八大板块' },
+];
+
+/* 客户名称建议（内置 + 库内历史值自动并入 datalist） */
+const OWNER_UNIT_PRESETS = [
+  '山西省第十地质工程勘察院',
+];
+
+/* 权限定义（左侧权限栏 + 管理员授权页共用） */
+const PERM_DEFS = [
+  { key: 'view',     label: '查看本部门台账' },
+  { key: 'view_all', label: '查看全部台账' },
+  { key: 'add',      label: '新增记录' },
+  { key: 'edit',     label: '编辑记录' },
+  { key: 'delete',   label: '删除记录' },
+  { key: 'import',   label: 'Excel 导入' },
+  { key: 'export',   label: '导出 Excel' },
+];
+
+/* 标签颜色映射（表格中状态列的胶囊配色） */
+const TAG_COLORS = {
+  '完工': 'tag-green', '施工中': 'tag-blue', '中止': 'tag-orange', '取消或作废': 'tag-gray',
+  '正常': 'tag-green', '逾期': 'tag-overdue', '诉讼': 'tag-red', '和解': 'tag-teal',
+};
+</script>
+<script>/**
+ * utils.js - 通用工具（格式化 / DOM / 提示 / 确认框 / 防抖）
+ */
+
+const Utils = {
+
+  /** HTML 转义 */
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
+  /** 金额格式化：千分位，最多 2 位小数（整数不带小数点） */
+  fmtMoney(v) {
+    if (v === null || v === undefined || v === '') return '';
+    const n = Number(v);
+    if (!isFinite(n)) return String(v);
+    const fixed = Math.abs(n) >= 1000 ? n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : String(Math.round(n * 100) / 100);
+    return fixed;
+  },
+
+  /** 解析金额输入/Excel 单元格（支持千分位、字符串） */
+  parseMoney(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    const s = String(v).replace(/[,\s￥¥]/g, '').replace(/[（）()]/g, m => m === '（' || m === '(' ? '-' : '');
+    const n = Number(s);
+    return isFinite(n) && s !== '' ? n : null;
+  },
+
+  /** 日期格式化 YYYY-MM-DD */
+  fmtDate(v) {
+    if (!v) return '';
+    if (typeof v === 'string') {
+      const m = v.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})/);
+      if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+      const d = new Date(v);
+      return isNaN(d) ? v.slice(0, 10) : d.toISOString().slice(0, 10);
+    }
+    return '';
+  },
+
+  /**
+   * Excel 日期值 -> YYYY-MM-DD
+   * SheetJS cellDates 模式给 Date 对象；数字为 Excel 序列号
+   */
+  parseExcelDate(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (v instanceof Date && !isNaN(v)) {
+      return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+    }
+    if (typeof v === 'number' && v > 20000 && v < 80000) {
+      // Excel 序列号（1900 日期系统）
+      const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return d.toISOString().slice(0, 10);
+    }
+    const s = String(v).trim();
+    if (!s) return null;
+    const m = s.match(/^(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})日?$/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+    const d = new Date(s);
+    if (!isNaN(d) && d.getFullYear() > 1990) return d.toISOString().slice(0, 10);
+    return null;
+  },
+
+  /**
+   * 项目名称等长文本截断：≤3 行 × 每行 12 个汉字，超出以 … 结尾
+   */
+  clampName(str, maxLine = 12, maxLineCount = 3) {
+    const s = String(str || '');
+    if (!s) return '';
+    const limit = maxLine * maxLineCount;
+    if (s.length <= limit) return s;
+    return s.slice(0, limit) + '…';
+  },
+
+  /** 防抖 */
+  debounce(fn, wait = 300) {
+    let t = null;
+    return function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
+  },
+
+  /** 轻提示 */
+  toast(msg, type = 'info') {
+    let box = document.getElementById('toast-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'toast-box';
+      document.body.appendChild(box);
+    }
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    box.appendChild(el);
+    setTimeout(() => { el.classList.add('show'); }, 10);
+    setTimeout(() => {
+      el.classList.remove('show');
+      setTimeout(() => el.remove(), 300);
+    }, type === 'error' ? 4200 : 2600);
+  },
+
+  /**
+   * 确认框（Promise<boolean>）
+   * @param {string} message 支持 \n 换行
+   * @param {object} opts { title, danger, confirmText }
+   */
+  confirm(message, opts = {}) {
+    return new Promise(resolve => {
+      const old = document.getElementById('modal-confirm');
+      if (old) old.remove();
+      const el = document.createElement('div');
+      el.id = 'modal-confirm';
+      el.className = 'modal-mask';
+      el.innerHTML = `
+        <div class="modal modal-sm">
+          <div class="modal-header">${Utils.escapeHtml(opts.title || '请确认')}</div>
+          <div class="modal-body confirm-msg">${Utils.escapeHtml(message).replace(/\n/g, '<br>')}</div>
+          <div class="modal-footer">
+            <button class="btn" data-act="cancel">取消</button>
+            <button class="btn ${opts.danger ? 'btn-danger' : 'btn-primary'}" data-act="ok">${Utils.escapeHtml(opts.confirmText || '确定')}</button>
+          </div>
+        </div>`;
+      document.body.appendChild(el);
+      let sx = 0, sy = 0;
+      el.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
+      el.addEventListener('click', e => {
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+        if (e.target === el || e.target.closest('[data-act="cancel"]')) { el.remove(); resolve(false); }
+        else if (e.target.closest('[data-act="ok"]')) { el.remove(); resolve(true); }
+      });
+    });
+  },
+
+  /**
+   * 弹窗遮罩点击关闭（带拖拽误触保护：按下滑动超 6px 不关闭）
+   * @param {HTMLElement} mask 遮罩元素
+   * @param {Function} onClose 点击遮罩关闭时回调
+   */
+  bindMaskClose(mask, onClose) {
+    let sx = 0, sy = 0;
+    mask.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
+    mask.addEventListener('click', e => {
+      if (e.target !== mask) return;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+      onClose();
+    });
+  },
+
+  /** 密码强度评分（0-5）：长度≥8 / 大写 / 小写 / 数字 / 符号 各计 1 分 */
+  pwdScore(v) {
+    if (!v) return 0;
+    let s = 0;
+    if (v.length >= 8) s++;
+    if (/[A-Z]/.test(v)) s++;
+    if (/[a-z]/.test(v)) s++;
+    if (/[0-9]/.test(v)) s++;
+    if (/[^A-Za-z0-9]/.test(v)) s++;
+    return s;
+  },
+
+  /** 密码是否符合强密码规则（≥8 位 + 四类字符） */
+  pwdValid(v) { return this.pwdScore(v) >= 5; },
+
+  /** 给密码输入框绑定实时强度进度条（bar 进度条元素，hint 提示元素） */
+  bindPwdMeter(input, bar, hint) {
+    /* 色阶与设计令牌同源（oklch → sRGB）：灰 → 朱砂 → 琥珀 → 橄榄 → 绿 */
+    const colors = ['#e0e3e8', '#a74639', '#975800', '#756c00', '#53760e', '#137d41'];
+    const update = () => {
+      const v = input.value;
+      const s = this.pwdScore(v);
+      const ok = this.pwdValid(v);
+      bar.style.width = (v ? Math.max(s / 5 * 100, 8) : 0) + '%';
+      bar.style.background = v ? colors[s] : colors[0];
+      if (!v) {
+        hint.textContent = '至少 8 位，须同时包含大写字母、小写字母、数字和符号';
+        hint.classList.remove('ok');
+        return;
+      }
+      const missing = [];
+      if (v.length < 8) missing.push('至少 8 位');
+      if (!/[A-Z]/.test(v)) missing.push('大写字母');
+      if (!/[a-z]/.test(v)) missing.push('小写字母');
+      if (!/[0-9]/.test(v)) missing.push('数字');
+      if (!/[^A-Za-z0-9]/.test(v)) missing.push('符号');
+      hint.textContent = ok ? '✓ 密码强度合格' : '还缺：' + missing.join('、');
+      hint.classList.toggle('ok', ok);
+    };
+    input.addEventListener('input', update);
+    update();
+  },
+
+  /** 计算两个日期相差天数（b - a） */
+  daysBetween(a, b) {
+    if (!a || !b) return null;
+    const da = new Date(a + 'T00:00:00'), db = new Date(b + 'T00:00:00');
+    if (isNaN(da) || isNaN(db)) return null;
+    return Math.round((db - da) / 86400000);
+  },
+
+  /** 今天 YYYY-MM-DD */
+  today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  },
+
+  /**
+   * 说明（2026-09-15）：原 `overdueStatus()`（按完工日期 + 预警天数自动判定超期）
+   * 已删除。它引用的 receivable_total / end_date 是 v3 已废弃字段，且按
+   * CONTEXT.md / ADR-0002 的结论——本院"按合同期限几乎全部逾期"、自动判定无区分度，
+   * 债权状态改为人工维护（「债权状态」下拉）。系统不做自动逾期判定。
+   */
+};
+</script>
+<script>/**
+ * admin.js - 用户管理 + 部门管理（管理员）+ 系统设置（管理员）
+ *
+ * 角色体系（与月报系统独立）：
+ *   超级管理员 ar_super_admin=true → 全部账号管理 + 部门管理 + 系统设置
+ *   普通管理员 ar_role='admin'    → 台账全部权限 + 报账员管理 + 部门管理 + 系统设置
+ *   报账员     ar_role='user'     → 权限由 ar_user_perms 逐人开放
+ *
+ * 部门存于台账独立的 ar_departments 表，与月报系统互不影响；
+ * 删除账号只移出台账（不删登录账号），对月报系统零影响。
+ */
+
+const Admin = {
+
+  users: [],   // [{id, email, full_name, phone, ar_role, ar_super_admin, department_id, ar_departments, perms}]
+  depts: [],   // [{id, name, sort_order}]
+  /** 权限表读取异常时的页面提示（空串 = 正常） */
+  permsWarning: '',
+
+  async load() {
+    const { data: profiles, error } = await sb.from('ar_users')
+      .select('user_id, email, full_name, phone, department_id, ar_role, ar_super_admin, ar_protected, ar_departments(name)')
+      .order('ar_super_admin', { ascending: false }).limit(500);
+    if (error) { Utils.toast('用户列表加载失败：' + error.message, 'error'); return; }
+    // 报账员的「台账权限」列完全依赖这张表。读不到时必须**看得见**，
+    // 否则会表现成"所有报账员都没有权限"（常见原因：管理员判定策略未更新）
+    const { data: permsRows, error: permErr } = await sb.from('ar_user_perms').select('user_id, perms');
+    const permMap = new Map((permsRows || []).map(p => [p.user_id, p.perms || {}]));
+    this.users = (profiles || []).map(p => ({ ...p, id: p.user_id, perms: permMap.get(p.user_id) || {} }));
+    this.permsWarning = '';
+    if (permErr) {
+      this.permsWarning = '权限数据读取失败：' + permErr.message +
+        '　→ 下面的权限勾选不可信，请先执行 sql/upgrade-v3.2-admin-rls.sql 再刷新。';
+    } else if (!(permsRows || []).length && this.users.some(u => u.ar_role === 'user')) {
+      this.permsWarning = '系统里有报账员，但一条权限记录都没读到。若确认分配过权限，请执行 sql/upgrade-v3.2-admin-rls.sql（管理员判定策略修复）后刷新。';
+    }
+    await this.loadDepts();
+    this.render();
+  },
+
+  /** 加载台账部门字典（同步给台账页/导入页的下拉使用） */
+  async loadDepts() {
+    const { data } = await sb.from('ar_departments').select('id, name, sort_order').order('sort_order');
+    this.depts = data || [];
+    Ledger.departments = this.depts.map(d => ({ id: d.id, name: d.name }));
+  },
+
+  roleTag(u) {
+    if (u.ar_super_admin) return '<span class="tag tag-red">超级管理员</span>';
+    if (u.ar_role === 'admin') return '<span class="tag tag-blue">管理员</span>';
+    return '<span class="tag tag-teal">报账员</span>';
+  },
+
+  render() {
+    const page = document.getElementById('page-admin');
+    if (!page) return;
+    if (!Auth.isAdmin) {
+      page.innerHTML = '<div class="page-head"><h2>用户管理</h2></div><div class="guide-card"><p class="muted">只有管理员可以查看用户。</p></div>';
+      return;
+    }
+    const canManage = Auth.isSuperAdmin;   // 超级管理员：管理全部账号；普通管理员：仅管理报账员
+
+    const rows = this.users.map(u => {
+      const isSelf = u.id === Auth.currentUser.id;
+      const dept = (u.ar_departments && u.ar_departments.name) || '未分配';
+      const isReporter = u.ar_role === 'user';
+
+      // 台账权限列：管理员恒有全部权限；报账员逐项勾选
+      let permCell;
+      if (!isReporter) {
+        permCell = '<span class="perm-full" title="管理员自动拥有全部台账权限，无需逐项分配">🔒 全部台账权限</span>';
+      } else if (Auth.isAdmin) {
+        permCell = '<div class="perm-cell" data-perm-cell="' + u.id + '">' +
+          PERM_DEFS.map(p => `
+            <label class="perm-toggle" title="${p.label}">
+              <input type="checkbox" data-user="${u.id}" data-perm="${p.key}" ${u.perms[p.key] ? 'checked' : ''}>
+              <span>${p.label}</span>
+            </label>`).join('') +
+          `<div class="perm-foot">
+             <span class="perm-state">已保存</span>
+             <button class="perm-save" data-act="save-perms" data-id="${u.id}" disabled>保存权限</button>
+           </div></div>`;
+      } else {
+        const n = PERM_DEFS.filter(p => u.perms[p.key]).length;
+        permCell = '<span class="perm-full">' + n + ' / ' + PERM_DEFS.length + ' 项权限</span>';
+      }
+
+      // 操作列
+      const acts = [];
+      const canEditThis = canManage ? (!u.ar_protected || isSelf) : isReporter;
+      if (canEditThis) acts.push('<a data-act="edit" data-id="' + u.id + '">编辑</a>');
+      // 删除：超级管理员可删除自己以外任何账号；普通管理员仅可删报账员；主管理员受保护不可删
+      const canDelete = (Auth.isSuperAdmin && !isSelf && !u.ar_protected) || (!Auth.isSuperAdmin && isReporter);
+      if (canDelete) acts.push('<a class="link-danger" data-act="del" data-id="' + u.id + '">删除</a>');
+      // 无可执行操作时给出原因，避免整列空白看起来像坏了
+      const actCell = acts.length ? acts.join('')
+        : isSelf ? '<span class="act-none" title="不能在这里删除或降级自己的账号">当前账号</span>'
+          : !isReporter ? '<span class="act-none" title="管理员账号只能由超级管理员管理">🔒 仅超管</span>'
+            : '<span class="act-none">—</span>';
+
+      return `<tr data-id="${u.id}" class="${u.ar_protected ? 'row-admin' : ''}">
+        <td class="cell-name">${Utils.escapeHtml(u.full_name || '（未命名）')}${isSelf ? ' <span class="tag tag-blue">我</span>' : ''}${u.ar_protected ? ' <span class="lock-chip" title="系统保留账号：不可删除、不可降级">🔒 受保护</span>' : ''}</td>
+        <td class="cell-ell" title="${Utils.escapeHtml(u.email || '')}">${Utils.escapeHtml(u.email || '')}</td>
+        <td class="cell-ell" title="${Utils.escapeHtml(dept)}">${Utils.escapeHtml(dept)}</td>
+        <td class="cell-ell">${Utils.escapeHtml(u.phone || '')}</td>
+        <td class="cell-ell">${this.roleTag(u)}</td>
+        <td>${permCell}</td>
+        <td>${actCell}</td>
+      </tr>`;
+    }).join('');
+
+    // 部门管理（卡片网格）：笔数 = 该部门的台账记录数，便于判断哪些部门在用
+    const countOf = {};
+    (Ledger.rows || []).forEach(r => { countOf[r.department_id] = (countOf[r.department_id] || 0) + 1; });
+    const deptCards = this.depts.map((d, i) => `
+      <div class="dept-card" data-id="${d.id}">
+        <div class="dc-head">
+          <span class="dc-name" title="${Utils.escapeHtml(d.name)}">${Utils.escapeHtml(d.name)}</span>
+          <span class="dc-count ${countOf[d.id] ? '' : 'zero'}" title="该部门的台账记录数">${countOf[d.id] || 0}</span>
+        </div>
+        <div class="dc-acts">
+          <button class="dc-btn" data-act="dept-up" data-id="${d.id}" ${i === 0 ? 'disabled' : ''} title="上移">↑</button>
+          <button class="dc-btn" data-act="dept-down" data-id="${d.id}" ${i === this.depts.length - 1 ? 'disabled' : ''} title="下移">↓</button>
+          <button class="dc-btn" data-act="dept-edit" data-id="${d.id}" title="重命名">重命名</button>
+          <button class="dc-btn danger" data-act="dept-del" data-id="${d.id}" title="删除" ${countOf[d.id] ? 'disabled' : ''}>删除</button>
+        </div>
+      </div>`).join('') || '<div class="dept-empty">暂无部门，在右上角输入名称后点「＋ 新增部门」创建</div>';
+
+    page.innerHTML = `
+      <div class="page-head">
+        <h2>用户管理</h2>
+        <span class="muted">${canManage
+          ? '超级管理员：新增/编辑/删除全部账号；台账账号、部门体系与月报系统互相独立'
+          : '管理员：可管理报账员账号与部门；管理员账号由超级管理员管理'}</span>
+      </div>
+      <div class="toolbar">
+        <div class="toolbar-left"><span class="muted">共 ${this.users.length} 个账号 · 「删除」仅将账号移出台账，绝不影响月报系统</span></div>
+        <div class="toolbar-right">${Auth.isAdmin ? '<button class="btn btn-primary" data-act="create">＋ 新增账号</button>' : ''}</div>
+      </div>
+      ${this.permsWarning ? `<div class="admin-warn">⚠ ${Utils.escapeHtml(this.permsWarning)}</div>` : ''}
+      <div class="table-wrap">
+        <table class="admin-table">
+          <colgroup>
+            <col class="c-user"><col class="c-mail"><col class="c-dept">
+            <col class="c-phone"><col class="c-role"><col class="c-perm"><col class="c-act">
+          </colgroup>
+          <thead><tr>
+            <th>用户</th><th>邮箱</th><th>部门</th><th>手机号</th><th>角色</th><th>台账权限</th><th>操作</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="dept-panel">
+        <div class="dept-panel-head">
+          <div>
+            <div class="dph-title">部门管理</div>
+            <div class="dph-sub">台账独立部门，与月报系统互不影响 · 卡片右上角数字为该部门的台账记录数<br>
+              已被用户或台账数据使用的部门不能删除；顺序即台账筛选与下拉里的展示顺序</div>
+          </div>
+          <div class="dept-add">
+            <input class="ipt" id="dept-new-name" placeholder="新部门名称，如：财务资产部">
+            <button class="btn btn-primary" data-act="dept-add">＋ 新增部门</button>
+          </div>
+        </div>
+        <div class="dept-grid" id="dept-list">${deptCards}</div>
+      </div>`;
+
+    if (Auth.isAdmin) {
+      page.querySelector('[data-act="create"]').addEventListener('click', () => this.userDialog(null));
+      page.querySelectorAll('[data-act="edit"]').forEach(a => a.addEventListener('click', () => {
+        const u = this.users.find(x => x.id === a.dataset.id);
+        if (u) this.userDialog(u);
+      }));
+      page.querySelectorAll('[data-act="save-perms"]').forEach(a => a.addEventListener('click', () => this.savePerms(a.dataset.id)));
+      // 勾选后才有「保存权限」：有改动时按钮点亮并提示，避免一个常驻却无意义的链接
+      page.querySelectorAll('[data-perm-cell]').forEach(cell => {
+        cell.addEventListener('change', () => {
+          cell.classList.add('is-dirty');
+          const st = cell.querySelector('.perm-state');
+          const btn = cell.querySelector('[data-act="save-perms"]');
+          if (st) st.textContent = '有未保存的修改';
+          if (btn) btn.disabled = false;
+        });
+      });
+      page.querySelector('[data-act="dept-add"]').addEventListener('click', () => this.deptAdd());
+      page.querySelectorAll('[data-act="dept-up"]').forEach(b =>
+        b.addEventListener('click', () => this.moveDept(b.dataset.id, 'up')));
+      page.querySelectorAll('[data-act="dept-down"]').forEach(b =>
+        b.addEventListener('click', () => this.moveDept(b.dataset.id, 'down')));
+      page.querySelectorAll('[data-act="dept-edit"]').forEach(a => a.addEventListener('click', () => {
+        const d = this.depts.find(x => x.id === a.dataset.id);
+        if (d) this.deptDialog(d);
+      }));
+      page.querySelectorAll('[data-act="dept-del"]').forEach(a => a.addEventListener('click', () => this.deleteDept(a.dataset.id)));
+    }
+    page.querySelectorAll('[data-act="del"]').forEach(a => a.addEventListener('click', () => this.deleteUser(a.dataset.id)));
+  },
+
+  /** 删除账号（超级管理员：除自己外任意；普通管理员：仅报账员） */
+  async deleteUser(userId) {
+    const u = this.users.find(x => x.id === userId);
+    if (!u) return;
+    const ok = await Utils.confirm(
+      `确定删除账号「${u.full_name || u.email}」？\n该账号将被移出台账系统（登录账号保留，月报系统不受任何影响）。`,
+      { danger: true, title: '删除账号', confirmText: '删除' });
+    if (!ok) return;
+    const { error } = await sb.rpc('ar_delete_user', { p_user_id: userId });
+    if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
+    Utils.toast('已移出台账（不影响月报系统）', 'success');
+    await this.load();
+  },
+
+  /** 报账员权限保存 */
+  async savePerms(userId) {
+    const perms = {};
+    document.querySelectorAll(`input[data-user="${userId}"]`).forEach(cb => {
+      if (cb.checked) perms[cb.dataset.perm] = true;
+    });
+    const { error } = await sb.from('ar_user_perms').upsert(
+      { user_id: userId, perms, updated_by: Auth.currentUser.id, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' });
+    if (error) { Utils.toast('保存失败：' + error.message, 'error'); return; }
+    const u = this.users.find(x => x.id === userId);
+    if (u) u.perms = perms;
+    // 复位该行的「未保存」态：按钮退回未点亮、状态文字回到已保存
+    const cell = document.querySelector(`[data-perm-cell="${userId}"]`);
+    if (cell) {
+      cell.classList.remove('is-dirty');
+      const st = cell.querySelector('.perm-state');
+      const btn = cell.querySelector('[data-act="save-perms"]');
+      if (st) st.textContent = '已保存';
+      if (btn) btn.disabled = true;
+    }
+    Utils.toast('权限已保存', 'success');
+  },
+
+  /** 新增 / 编辑账号弹窗（含密码强度条） */
+  userDialog(user) {
+    const isNew = !user;
+    const old = document.getElementById('modal-user');
+    if (old) old.remove();
+
+    const deptOpts = ['<option value="">（请选择部门）</option>', ...this.depts.map(d =>
+      `<option value="${d.id}" ${user && user.department_id === d.id ? 'selected' : ''}>${Utils.escapeHtml(d.name)}</option>`)].join('');
+    const adminOpt = Auth.isSuperAdmin ? '<option value="admin">管理员（全部台账权限）</option>' : '';
+    const roleOpts = isNew
+      ? `<option value="user" selected>报账员（按权限开放）</option>${adminOpt}`
+      : user.ar_super_admin
+        ? '<option value="admin" selected>超级管理员（SQL 设置，界面不可改）</option>'
+        : `<option value="user" ${user.ar_role === 'user' ? 'selected' : ''}>报账员（按权限开放）</option>${adminOpt}`;
+    const permBoxes = PERM_DEFS.map(p => `
+      <label class="perm-toggle"><input type="checkbox" data-perm="${p.key}" ${user && user.perms[p.key] ? 'checked' : ''}>
+      <span>${p.label}</span></label>`).join('');
+
+    const el = document.createElement('div');
+    el.id = 'modal-user';
+    el.className = 'modal-mask';
+    el.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">${isNew ? '新增账号' : '编辑账号'}<span class="modal-close" data-act="close">×</span></div>
+        <div class="modal-body">
+          <div class="form-grid">
+            ${isNew ? `<label class="form-field"><span class="ff-label">邮箱（登录账号）</span><input class="ipt" id="u-email" placeholder="name@company.com"></label>
+                       <label class="form-field"><span class="ff-label">初始密码</span><input class="ipt" id="u-pwd" type="text" placeholder="至少 8 位，含大小写/数字/符号" autocomplete="new-password"></label>`
+                    : `<label class="form-field"><span class="ff-label">邮箱</span><input class="ipt" value="${Utils.escapeHtml(user.email || '')}" disabled></label>
+                       <label class="form-field"><span class="ff-label">重置密码（留空不修改）</span><input class="ipt" id="u-pwd" type="text" placeholder="至少 8 位，含大小写/数字/符号" autocomplete="new-password"></label>`}
+            <label class="form-field"><span class="ff-label">姓名</span><input class="ipt" id="u-name" value="${Utils.escapeHtml(user ? (user.full_name || '') : '')}"></label>
+            <label class="form-field"><span class="ff-label">手机号（可用于登录）</span><input class="ipt" id="u-phone" value="${Utils.escapeHtml(user ? (user.phone || '') : '')}"></label>
+            <label class="form-field"><span class="ff-label">角色</span><select class="ipt" id="u-role" ${isNew ? '' : (user.ar_super_admin ? 'disabled' : '')}>${roleOpts}</select></label>
+            <label class="form-field"><span class="ff-label">部门（报账员必选）</span><select class="ipt" id="u-dept">${deptOpts}</select></label>
+          </div>
+          <div class="pwd-meter"><div class="pwd-meter-bar" id="u-pwd-bar"></div></div>
+          <div class="pwd-hint" id="u-pwd-hint"></div>
+          <div class="form-field form-full" style="margin-top:12px"><span class="ff-label">台账权限（报账员生效；管理员自动拥有全部）</span>
+            <div class="perm-cell" id="u-perms">${permBoxes}</div>
+          </div>
+          <div class="form-hint">若邮箱已被月报系统使用，将直接把该账号加入台账（无需密码，原登录方式不变）。</div>
+          <div id="user-error" class="editor-error hidden"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" data-act="close">取消</button>
+          <button class="btn btn-primary" data-act="ok">${isNew ? '创建账号' : '保存修改'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(el);
+    el.querySelector('[data-act="close"]').addEventListener('click', () => el.remove());
+    Utils.bindMaskClose(el, () => el.remove());
+    Utils.bindPwdMeter(el.querySelector('#u-pwd'), el.querySelector('#u-pwd-bar'), el.querySelector('#u-pwd-hint'));
+
+    const roleSel = el.querySelector('#u-role');
+    const syncPermDisabled = () => {
+      const r = roleSel.value;
+      el.querySelectorAll('#u-perms input').forEach(cb => { cb.disabled = r !== 'user'; });
+      el.querySelector('#u-perms').style.opacity = r === 'user' ? '1' : '.45';
+    };
+    roleSel.addEventListener('change', syncPermDisabled);
+    syncPermDisabled();
+
+    el.querySelector('[data-act="ok"]').addEventListener('click', async () => {
+      const errBox = el.querySelector('#user-error');
+      errBox.classList.add('hidden');
+      const fullName = el.querySelector('#u-name').value.trim();
+      const phone = el.querySelector('#u-phone').value.trim();
+      const dept = el.querySelector('#u-dept').value || null;
+      const pwd = el.querySelector('#u-pwd').value;
+      const role = roleSel.value;
+      const perms = {};
+      el.querySelectorAll('#u-perms input[data-perm]').forEach(cb => { if (cb.checked) perms[cb.dataset.perm] = true; });
+
+      // 强密码前端校验（创建必填；编辑留空表示不改密码）
+      if ((isNew || pwd) && !Utils.pwdValid(pwd)) {
+        errBox.textContent = '密码须至少 8 位，且同时包含大写字母、小写字母、数字和符号';
+        errBox.classList.remove('hidden');
+        return;
+      }
+
+      let error;
+      if (isNew) {
+        const email = el.querySelector('#u-email').value.trim();
+        if (!email || !pwd) {
+          errBox.textContent = '邮箱和初始密码必填'; errBox.classList.remove('hidden'); return;
+        }
+        ({ error } = await sb.rpc('ar_create_user', {
+          p_email: email, p_password: pwd, p_full_name: fullName || null,
+          p_phone: phone || null, p_department_id: dept, p_ar_role: role, p_perms: perms }));
+      } else {
+        ({ error } = await sb.rpc('ar_update_user', {
+          p_user_id: user.id, p_full_name: fullName || null, p_phone: phone || null,
+          p_department_id: dept, p_ar_role: roleSel.disabled ? null : role,
+          p_password: pwd || null, p_perms: role === 'user' ? perms : null }));
+      }
+      if (error) {
+        errBox.textContent = '保存失败：' + error.message;
+        errBox.classList.remove('hidden');
+        return;
+      }
+      el.remove();
+      Utils.toast(isNew ? '账号已创建' : '已保存', 'success');
+      await this.load();
+    });
+  },
+
+  /* ---------- 部门管理 ---------- */
+
+  /** 新增部门：输入框有值直接创建，留空则开弹窗（走带校验的完整流程） */
+  async deptAdd() {
+    const inp = document.getElementById('dept-new-name');
+    const name = (inp && inp.value || '').trim();
+    if (!name) { this.deptDialog(null); return; }
+    const { error } = await sb.from('ar_departments').insert({ name, sort_order: this.depts.length + 1 });
+    if (error) {
+      Utils.toast('创建失败：' + (/duplicate|unique/i.test(error.message) ? '该部门名称已存在' : error.message), 'error');
+      return;
+    }
+    Utils.toast(`已创建部门「${name}」`, 'success');
+    await this.load();
+  },
+
+  /** 部门排序：与相邻项交换，并把 sort_order 规范化为 1..n（下拉与筛选顺序即此顺序） */
+  async moveDept(deptId, dir) {
+    const i = this.depts.findIndex(d => d.id === deptId);
+    if (i < 0) return;
+    const j = dir === 'up' ? i - 1 : i + 1;
+    if (j < 0 || j >= this.depts.length) return;
+    const arr = [...this.depts];
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    // 只更新顺序真正变化的行，避免无谓写入
+    const changed = arr
+      .map((d, idx) => ({ id: d.id, sort_order: idx + 1, old: Number(d.sort_order || 0) }))
+      .filter(r => r.old !== r.sort_order);
+    for (const r of changed) {
+      const { error } = await sb.from('ar_departments').update({ sort_order: r.sort_order }).eq('id', r.id);
+      if (error) { Utils.toast('排序保存失败：' + error.message, 'error'); await this.load(); return; }
+    }
+    await this.load();
+  },
+
+  deptDialog(dept) {
+    const isNew = !dept;
+    const old = document.getElementById('modal-dept');
+    if (old) old.remove();
+    const el = document.createElement('div');
+    el.id = 'modal-dept';
+    el.className = 'modal-mask';
+    el.innerHTML = `
+      <div class="modal modal-sm">
+        <div class="modal-header">${isNew ? '新增部门' : '重命名部门'}<span class="modal-close" data-act="close">×</span></div>
+        <div class="modal-body">
+          <label class="form-field"><span class="ff-label">部门名称</span>
+            <input class="ipt" id="dept-name" value="${Utils.escapeHtml(dept ? dept.name : '')}" placeholder="如：财务资产部"></label>
+          <div id="dept-error" class="editor-error hidden"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" data-act="close">取消</button>
+          <button class="btn btn-primary" data-act="ok">${isNew ? '创建' : '保存'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(el);
+    el.querySelector('[data-act="close"]').addEventListener('click', () => el.remove());
+    Utils.bindMaskClose(el, () => el.remove());
+    el.querySelector('#dept-name').focus();
+
+    el.querySelector('[data-act="ok"]').addEventListener('click', async () => {
+      const name = el.querySelector('#dept-name').value.trim();
+      const errBox = el.querySelector('#dept-error');
+      errBox.classList.add('hidden');
+      if (!name) { errBox.textContent = '请输入部门名称'; errBox.classList.remove('hidden'); return; }
+      let error;
+      if (isNew) ({ error } = await sb.from('ar_departments').insert({ name }));
+      else ({ error } = await sb.from('ar_departments').update({ name }).eq('id', dept.id));
+      if (error) {
+        errBox.textContent = '保存失败：' + (error.message.includes('duplicate') || error.message.includes('unique') ? '该部门名称已存在' : error.message);
+        errBox.classList.remove('hidden');
+        return;
+      }
+      el.remove();
+      Utils.toast(isNew ? '部门已创建' : '已保存', 'success');
+      await this.load();
+    });
+  },
+
+  async deleteDept(deptId) {
+    const d = this.depts.find(x => x.id === deptId);
+    if (!d) return;
+    const used = this.users.some(u => u.department_id === deptId);
+    const ok = await Utils.confirm(
+      `确定删除部门「${d.name}」？` + (used ? '\n该部门下仍有用户，需先在用户列表中调整其部门。' : ''),
+      { danger: true, title: '删除部门', confirmText: '删除' });
+    if (!ok) return;
+    const { error } = await sb.from('ar_departments').delete().eq('id', deptId);
+    if (error) {
+      const msg = /foreign key|外键/i.test(error.message)
+        ? '该部门仍被用户或台账数据引用，无法删除'
+        : error.message;
+      Utils.toast('删除失败：' + msg, 'error');
+      return;
+    }
+    Utils.toast('部门已删除', 'success');
+    await this.load();
+  },
+
+  /* ---------- 系统设置（管理员） ---------- */
+  /*
+   * 本页只放「运行信息 + 数据维护工具」，不放业务词典：
+   *   客户属性 / 部门 / 单位 / 工作性质 … 等下拉选项统一在「选项管理」页维护（ar_dict）。
+   *
+   * 历史变更（2026-09-15）：删除「超期预警天数」设置。它来自 v1 的自动逾期设想，
+   * 但按 CONTEXT.md / ADR-0002 的结论，本院业务"按合同期限几乎全部逾期"、自动判定
+   * 无区分度，债权状态改为人工维护，该天数已无人使用（Utils.overdueStatus 亦无调用方）。
+   */
+
+  async loadSettings() {
+    const page = document.getElementById('page-settings');
+    if (!page) return;
+
+    // 前端构建版本：直接读 index.html 里 config.js 的 ?v=（免去两处手工同步）
+    const build = (document.querySelector('script[src*="config.js"]') || { src: '' }).src.match(/[?&]v=([\w.]+)/);
+    const dbHost = String(SUPABASE_URL || '').replace(/^https?:\/\//, '').replace(/\/+$/, '') || '未配置';
+    const u = Auth.arUser || {};
+    const roleName = Auth.isSuperAdmin ? '超级管理员' : (Auth.isAdmin ? '管理员' : '报账员');
+
+    // 明细表探测：表未建时给出明确指引，而不是让回款区块静默报错
+    let detailState = '<span class="tag tag-green">已就绪</span>';
+    const { error: probeErr } = await sb.from('ar_receipts').select('id').limit(1);
+    if (probeErr) {
+      detailState = '<span class="tag tag-orange">未创建</span> <span class="muted">需执行 sql/upgrade-v3.1-receipts.sql</span>';
+    }
+
+    page.innerHTML = `
+      <div class="page-head">
+        <h2>系统设置</h2>
+        <span class="muted">本页为运行信息与数据维护；业务下拉选项（客户属性 / 部门 / 单位 / 工作性质等）在「选项管理」页维护</span>
+      </div>
+      <div class="settings-grid">
+        <div class="settings-card">
+          <div class="set-title">系统信息</div>
+          <div class="set-list">
+            <div class="set-row"><span class="set-k">前端构建版本</span><span class="set-v">${build ? 'v' + Utils.escapeHtml(build[1]) : '未识别'}</span></div>
+            <div class="set-row"><span class="set-k">数据库实例</span><span class="set-v">${Utils.escapeHtml(dbHost)}</span></div>
+            <div class="set-row"><span class="set-k">台账记录</span><span class="set-v">${(Ledger.rows || []).length} 条</span></div>
+            <div class="set-row"><span class="set-k">开票/回款明细</span><span class="set-v">${detailState}</span></div>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="set-title">当前账号</div>
+          <div class="set-list">
+            <div class="set-row"><span class="set-k">登录邮箱</span><span class="set-v">${Utils.escapeHtml((Auth.currentUser && Auth.currentUser.email) || '—')}</span></div>
+            <div class="set-row"><span class="set-k">姓名</span><span class="set-v">${Utils.escapeHtml(u.full_name || '（未填写）')}</span></div>
+            <div class="set-row"><span class="set-k">角色</span><span class="set-v">${roleName}</span></div>
+            <div class="set-row"><span class="set-k">归属部门</span><span class="set-v">${Utils.escapeHtml((u.ar_departments && u.ar_departments.name) || '未分配')}</span></div>
+            <div class="set-row"><span class="set-k">台账权限</span><span class="set-v">${Auth.permCount()} / ${PERM_DEFS.length} 项${Auth.isAdmin ? '（管理员默认全部）' : ''}</span></div>
+          </div>
+          <div class="set-hint">账号信息与权限由管理员在「用户管理」页调整；密码在右上角「个人设置」里修改。</div>
+        </div>
+
+        <div class="settings-card">
+          <div class="set-title">数据维护</div>
+          <p class="set-hint">
+            「最新挂账时间」已改为按开票明细自动维护（= 该合同最近一笔开票日期）。
+            历史手工填写或导入的值与明细不一致时，可在此一键校正；没有开票明细的记录保持不变。
+          </p>
+          <button class="btn btn-primary" id="set-recalc">重算全部台账的挂账时间</button>
+          <div class="pwd-hint" id="set-recalc-msg"></div>
+        </div>
+      </div>`;
+
+    page.querySelector('#set-recalc').addEventListener('click', async () => {
+      const msg = page.querySelector('#set-recalc-msg');
+      const ok = await Utils.confirm(
+        '将把每条台账的「最新挂账时间」重算为该合同最近一笔开票日期。\n' +
+        '没有开票明细的记录保持不变。该操作可重复执行。',
+        { title: '重算挂账时间', confirmText: '开始重算' });
+      if (!ok) return;
+      msg.textContent = '正在重算…';
+      const { data, error } = await sb.rpc('ar_recalc_charge_date');
+      if (error) {
+        msg.textContent = /does not exist|schema cache|Could not find/i.test(error.message)
+          ? '数据库还没有这个维护函数，请先执行 sql/upgrade-v3.2-admin-rls.sql'
+          : '重算失败：' + error.message;
+        return;
+      }
+      const n = data && data.updated != null ? data.updated : 0;
+      msg.textContent = `已更新 ${n} 条记录`;
+      Utils.toast(`挂账时间重算完成：更新 ${n} 条`, 'success');
+      // 目标页是隐藏的台账页，刷新失败不影响本页结果
+      try { await Ledger.reload(); } catch (e) { /* 忽略 */ }
+    });
+  },
+};
+</script>
+<script>
+/* ---------- 模拟数据 & 假 Supabase（仅预览用） ---------- */
+const DEPTS = [
+  { id: 'd1', name: '财务资产部', sort_order: 0 },
+  { id: 'd2', name: '工程物探所', sort_order: 1 },
+  { id: 'd3', name: '测绘地理信息院', sort_order: 2 }
+];
+
+const USERS = [
+  { user_id: 'u1', email: 'jnsun@qq.com', full_name: '孙晋宁', phone: '17535938268',
+    department_id: null, ar_role: 'admin', ar_super_admin: true, ar_protected: true, ar_departments: null },
+  { user_id: 'u2', email: 'zhaobing@cw.com', full_name: '赵兵', phone: '13935937279',
+    department_id: null, ar_role: 'admin', ar_super_admin: false, ar_protected: false, ar_departments: null },
+  { user_id: 'u3', email: 'maliya@cw.com', full_name: '马丽亚', phone: '13663590428',
+    department_id: null, ar_role: 'admin', ar_super_admin: false, ar_protected: false, ar_departments: null },
+  { user_id: 'u4', email: 'pengyanju@cw.com', full_name: '彭艳菊', phone: '13466932621',
+    department_id: 'd2', ar_role: 'user', ar_super_admin: false, ar_protected: false,
+    ar_departments: { name: '工程物探所' } },
+  { user_id: 'u5', email: 'wangjianjun@cw.com', full_name: '王建军', phone: '13834567890',
+    department_id: 'd1', ar_role: 'user', ar_super_admin: false, ar_protected: false,
+    ar_departments: { name: '财务资产部' } },
+  { user_id: 'u6', email: 'verylongemailaddress@geo-survey-cw.com', full_name: '欧阳明月',
+    phone: '13612345678', department_id: 'd3', ar_role: 'user', ar_super_admin: false,
+    ar_protected: false, ar_departments: { name: '测绘地理信息院' } }
+];
+
+const PERMS = {
+  u1: {}, u2: {}, u3: {},
+  u4: { view: true, add: true, edit: true, delete: true, import: true, export: true },
+  u5: { view: true, export: true },
+  u6: {}
+};
+
+/* 最小可用的 PostgREST 链式替身 */
+function chain(result) {
+  const o = {
+    select: () => o, order: () => o, limit: () => o,
+    then: (res, rej) => Promise.resolve(result).then(res, rej)
+  };
+  return o;
+}
+const sb = {
+  from(t) {
+    if (t === 'ar_users') return chain({ data: USERS.slice(), error: null });
+    if (t === 'ar_user_perms') {
+      return chain({ data: Object.keys(PERMS).map(k => ({ user_id: k, perms: PERMS[k] })), error: null });
+    }
+    if (t === 'ar_departments') return chain({ data: DEPTS.slice(), error: null });
+    return chain({ data: [], error: null });
+  }
+};
+
+const Ledger = { rows: [
+  { department_id: 'd2' }, { department_id: 'd2' }, { department_id: 'd2' },
+  { department_id: 'd1' }, { department_id: 'd3' }, { department_id: 'd3' }
+], departments: [] };
+
+const Auth = {
+  isAdmin: true, isSuperAdmin: false,
+  currentUser: { id: 'u2' },
+  permCount: () => 0
+};
+
+(async () => {
+  const stage = document.getElementById('page-admin');
+
+  // ① 超级管理员视角（看自己 = 赵兵 换成 孙晋宁）
+  Auth.isSuperAdmin = true;
+  Auth.currentUser = { id: 'u1' };
+  await Admin.load();
+  document.getElementById('view-super').innerHTML = stage.innerHTML;
+
+  // ② 普通管理员视角（本人 = 赵兵，正是截图里的情况）
+  Auth.isSuperAdmin = false;
+  Auth.currentUser = { id: 'u2' };
+  await Admin.load();
+  document.getElementById('view-admin').innerHTML = stage.innerHTML;
+
+  stage.remove();
+
+  // 预览用：把「勾选→点亮保存按钮」的交互重新绑上（innerHTML 复制不会带走监听）
+  document.querySelectorAll('[data-perm-cell]').forEach(cell => {
+    cell.addEventListener('change', () => {
+      cell.classList.add('is-dirty');
+      const st = cell.querySelector('.perm-state');
+      const btn = cell.querySelector('[data-act="save-perms"]');
+      if (st) st.textContent = '有未保存的修改';
+      if (btn) btn.disabled = false;
+    });
+  });
+  document.title = '用户管理预览 · 已渲染';
+  document.body.dataset.ready = '1';
+
+  // 附加：#perm-modal 时直接打开编辑弹窗（校验弹窗里的权限网格，与表格共用组件）
+  // 注意用 Admin.users（load 时已把 perms 合并进去），mock 的 USERS 本身没有 perms 字段
+  if (location.hash === '#perm-modal') {
+    Auth.isSuperAdmin = true;
+    Auth.currentUser = { id: 'u1' };
+    Admin.userDialog(Admin.users.find(u => u.ar_role === 'user'));
+  }
+})();
+</script>
+</body>
+</html>

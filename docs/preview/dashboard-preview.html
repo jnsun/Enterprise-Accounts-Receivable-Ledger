@@ -439,7 +439,7 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   content: "—"; display: block; font-size: 20px; color: var(--ink-300); margin-bottom: 6px;
 }
 .table-status { margin-top: var(--s2); font-size: var(--t-xs); color: var(--ink-500); }
-.row-admin { --row-bg: oklch(98.6% 0.012 28) !important; }
+/* .row-admin 的整行粉色底已移除：斑马行 + 首列竖标记已足够，染色反而形成色块 */
 .att-has { color: var(--primary); font-weight: 500; }
 
 /* ---------- 标签 ---------- */
@@ -765,15 +765,62 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 }
 .batch-table tbody tr, .admin-table tbody tr { --row-bg: var(--surface); }
 .batch-table tbody tr:nth-child(even), .admin-table tbody tr:nth-child(even) { --row-bg: var(--row-alt); }
-.batch-table tbody tr:hover, .admin-table tbody tr:hover { background: var(--row-hover); }
+/* 行悬浮必须落在 td 上——td 自带不透明底色，染 tr 是看不见的 */
+.batch-table tbody tr:hover td, .admin-table tbody tr:hover td { background: var(--row-hover); }
 .batch-table tbody td, .admin-table tbody td { background: var(--row-bg); vertical-align: middle; }
-.perm-cell { display: flex; flex-wrap: wrap; gap: 3px 12px; max-width: 560px; align-items: center; }
+
+/* 用户表：固定列宽（列宽写死在 colgroup 上，表头与表体永不漂移） */
+.admin-table { table-layout: fixed; }
+/* 横向内边距收到 8px：与台账主表一致，也给「台账权限」列腾出勾选网格的宽度 */
+.admin-table th, .admin-table td { padding-left: 8px; padding-right: 8px; }
+.admin-table col.c-user  { width: 168px; }
+.admin-table col.c-mail  { width: 156px; }
+.admin-table col.c-dept  { width: 120px; }
+.admin-table col.c-phone { width: 108px; }
+.admin-table col.c-role  { width: 100px; }
+.admin-table col.c-act   { width: 104px; }
+/* 单行省略：固定布局下超长内容会压到邻列，必须裁掉 */
+.admin-table td.cell-ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.admin-table td.cell-name { white-space: normal; line-height: 1.45; }
+.admin-table tbody td:last-child a + a { margin-left: 12px; }
+/* 受保护的主管理员：整行染色会在单元格之间断成色块，改用首列一道竖标记 */
+.admin-table tbody tr.row-admin td:first-child { box-shadow: inset 2px 0 0 var(--primary-line); }
+
+/* 台账权限列：CSS Grid 对齐（绝不可给 td 直接 display:flex，会退出表格布局） */
+.perm-cell {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 3px 10px; align-items: center;
+}
 .perm-toggle {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: 4px; min-width: 0;
   font-size: var(--t-xs); color: var(--ink-600); cursor: pointer; white-space: nowrap;
 }
 .perm-toggle:hover { color: var(--primary); }
-.perm-toggle input { accent-color: var(--primary); cursor: pointer; }
+.perm-toggle input { accent-color: var(--primary); cursor: pointer; flex-shrink: 0; }
+.perm-foot {
+  grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s2); margin-top: 2px; padding-top: 5px; border-top: 1px dashed var(--line);
+}
+.perm-state { font-size: 11.5px; color: var(--ink-500); }
+.perm-cell.is-dirty .perm-state { color: var(--warn); font-weight: 500; }
+.perm-save {
+  font-family: var(--font); font-size: var(--t-xs); line-height: 1; padding: 4px 10px;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-600);
+  border-radius: var(--r1); cursor: pointer;
+  transition: border-color var(--dur-f) var(--ease), color var(--dur-f) var(--ease),
+              background var(--dur-f) var(--ease);
+}
+.perm-save:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.perm-cell.is-dirty .perm-save { background: var(--primary); border-color: var(--primary); color: var(--surface); }
+.perm-cell.is-dirty .perm-save:hover:not(:disabled) { background: var(--primary-600); color: var(--surface); }
+.perm-save:disabled { opacity: 0.5; cursor: default; }
+.perm-full { font-size: var(--t-xs); color: var(--ink-500); }
+.act-none { font-size: var(--t-xs); color: var(--ink-400); }
+.lock-chip {
+  display: inline-block; padding: 0 6px; border-radius: var(--r-pill);
+  font-size: 11px; line-height: 1.6; color: var(--ink-500);
+  background: var(--surface-3); border: 1px solid var(--line);
+}
 
 /* 密码强度条 */
 .pwd-meter { height: 5px; background: var(--surface-3); border-radius: var(--r-pill); overflow: hidden; margin-top: var(--s2); }

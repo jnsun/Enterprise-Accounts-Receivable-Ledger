@@ -63,37 +63,49 @@ const Admin = {
     const rows = this.users.map(u => {
       const isSelf = u.id === Auth.currentUser.id;
       const dept = (u.ar_departments && u.ar_departments.name) || '未分配';
-      // 权限列：管理员可勾选报账员权限
+      const isReporter = u.ar_role === 'user';
+
+      // 台账权限列：管理员恒有全部权限；报账员逐项勾选
       let permCell;
-      if (u.ar_role !== 'user') {
-        permCell = '<span class="muted">拥有全部台账权限</span>';
+      if (!isReporter) {
+        permCell = '<span class="perm-full" title="管理员自动拥有全部台账权限，无需逐项分配">🔒 全部台账权限</span>';
       } else if (Auth.isAdmin) {
-        permCell = PERM_DEFS.map(p => `
+        permCell = '<div class="perm-cell" data-perm-cell="' + u.id + '">' +
+          PERM_DEFS.map(p => `
             <label class="perm-toggle" title="${p.label}">
               <input type="checkbox" data-user="${u.id}" data-perm="${p.key}" ${u.perms[p.key] ? 'checked' : ''}>
               <span>${p.label}</span>
-            </label>`).join('') + '<a data-act="save-perms" data-id="' + u.id + '">保存权限</a>';
+            </label>`).join('') +
+          `<div class="perm-foot">
+             <span class="perm-state">已保存</span>
+             <button class="perm-save" data-act="save-perms" data-id="${u.id}" disabled>保存权限</button>
+           </div></div>`;
       } else {
         const n = PERM_DEFS.filter(p => u.perms[p.key]).length;
-        permCell = '<span class="muted">' + n + ' / ' + PERM_DEFS.length + ' 项权限</span>';
+        permCell = '<span class="perm-full">' + n + ' / ' + PERM_DEFS.length + ' 项权限</span>';
       }
+
       // 操作列
       const acts = [];
-      const isBaoZhangYuan = u.ar_role === 'user';
-      // 受保护的主管理员：只有本人能编辑（他人不可编辑/删除）
-      const canEditThis = canManage ? (!u.ar_protected || isSelf) : isBaoZhangYuan;
+      const canEditThis = canManage ? (!u.ar_protected || isSelf) : isReporter;
       if (canEditThis) acts.push('<a data-act="edit" data-id="' + u.id + '">编辑</a>');
       // 删除：超级管理员可删除自己以外任何账号；普通管理员仅可删报账员；主管理员受保护不可删
-      const canDelete = (Auth.isSuperAdmin && !isSelf && !u.ar_protected) || (!Auth.isSuperAdmin && isBaoZhangYuan);
+      const canDelete = (Auth.isSuperAdmin && !isSelf && !u.ar_protected) || (!Auth.isSuperAdmin && isReporter);
       if (canDelete) acts.push('<a class="link-danger" data-act="del" data-id="' + u.id + '">删除</a>');
-      return `<tr data-id="${u.id}" class="${u.ar_super_admin ? 'row-admin' : ''}">
-        <td style="min-width:130px">${Utils.escapeHtml(u.full_name || '（未命名）')}${isSelf ? ' <span class="tag tag-blue">我</span>' : ''}${u.ar_protected ? ' <span class="tag tag-red" title="不可被删除或降级">主管理员</span>' : ''}</td>
-        <td style="min-width:180px">${Utils.escapeHtml(u.email || '')}</td>
-        <td style="min-width:100px">${Utils.escapeHtml(dept)}</td>
-        <td style="min-width:110px">${Utils.escapeHtml(u.phone || '')}</td>
-        <td style="min-width:90px">${this.roleTag(u)}</td>
-        <td class="perm-cell">${permCell}</td>
-        <td style="width:150px;white-space:nowrap">${acts.join('')}</td>
+      // 无可执行操作时给出原因，避免整列空白看起来像坏了
+      const actCell = acts.length ? acts.join('')
+        : isSelf ? '<span class="act-none" title="不能在这里删除或降级自己的账号">当前账号</span>'
+          : !isReporter ? '<span class="act-none" title="管理员账号只能由超级管理员管理">🔒 仅超管</span>'
+            : '<span class="act-none">—</span>';
+
+      return `<tr data-id="${u.id}" class="${u.ar_protected ? 'row-admin' : ''}">
+        <td class="cell-name">${Utils.escapeHtml(u.full_name || '（未命名）')}${isSelf ? ' <span class="tag tag-blue">我</span>' : ''}${u.ar_protected ? ' <span class="lock-chip" title="系统保留账号：不可删除、不可降级">🔒 受保护</span>' : ''}</td>
+        <td class="cell-ell" title="${Utils.escapeHtml(u.email || '')}">${Utils.escapeHtml(u.email || '')}</td>
+        <td class="cell-ell" title="${Utils.escapeHtml(dept)}">${Utils.escapeHtml(dept)}</td>
+        <td class="cell-ell">${Utils.escapeHtml(u.phone || '')}</td>
+        <td class="cell-ell">${this.roleTag(u)}</td>
+        <td>${permCell}</td>
+        <td>${actCell}</td>
       </tr>`;
     }).join('');
 
@@ -128,6 +140,10 @@ const Admin = {
       ${this.permsWarning ? `<div class="admin-warn">⚠ ${Utils.escapeHtml(this.permsWarning)}</div>` : ''}
       <div class="table-wrap">
         <table class="admin-table">
+          <colgroup>
+            <col class="c-user"><col class="c-mail"><col class="c-dept">
+            <col class="c-phone"><col class="c-role"><col class="c-perm"><col class="c-act">
+          </colgroup>
           <thead><tr>
             <th>用户</th><th>邮箱</th><th>部门</th><th>手机号</th><th>角色</th><th>台账权限</th><th>操作</th>
           </tr></thead>
@@ -156,6 +172,16 @@ const Admin = {
         if (u) this.userDialog(u);
       }));
       page.querySelectorAll('[data-act="save-perms"]').forEach(a => a.addEventListener('click', () => this.savePerms(a.dataset.id)));
+      // 勾选后才有「保存权限」：有改动时按钮点亮并提示，避免一个常驻却无意义的链接
+      page.querySelectorAll('[data-perm-cell]').forEach(cell => {
+        cell.addEventListener('change', () => {
+          cell.classList.add('is-dirty');
+          const st = cell.querySelector('.perm-state');
+          const btn = cell.querySelector('[data-act="save-perms"]');
+          if (st) st.textContent = '有未保存的修改';
+          if (btn) btn.disabled = false;
+        });
+      });
       page.querySelector('[data-act="dept-add"]').addEventListener('click', () => this.deptAdd());
       page.querySelectorAll('[data-act="dept-up"]').forEach(b =>
         b.addEventListener('click', () => this.moveDept(b.dataset.id, 'up')));
@@ -196,6 +222,15 @@ const Admin = {
     if (error) { Utils.toast('保存失败：' + error.message, 'error'); return; }
     const u = this.users.find(x => x.id === userId);
     if (u) u.perms = perms;
+    // 复位该行的「未保存」态：按钮退回未点亮、状态文字回到已保存
+    const cell = document.querySelector(`[data-perm-cell="${userId}"]`);
+    if (cell) {
+      cell.classList.remove('is-dirty');
+      const st = cell.querySelector('.perm-state');
+      const btn = cell.querySelector('[data-act="save-perms"]');
+      if (st) st.textContent = '已保存';
+      if (btn) btn.disabled = true;
+    }
     Utils.toast('权限已保存', 'success');
   },
 
