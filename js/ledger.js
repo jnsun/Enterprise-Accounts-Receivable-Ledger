@@ -52,16 +52,24 @@ const Ledger = {
   computeRow(r) {
     const inv = Number(r.invoiced_amount || 0);
     const recv = Number(r.received_amount || 0);
-    const wo = Number(r.writeoff_amount || 0);
-    const hasFinal = r.final_amount !== null && r.final_amount !== undefined && r.final_amount !== '';
-    const fin = hasFinal ? Number(r.final_amount) : null;
+    const bal = this.balanceOf(r);
     return {
       receivable_internal: Math.round((inv - recv) * 10000) / 10000,
-      receivable_external: fin === null ? null : Math.round((fin - inv) * 10000) / 10000,
-      receivable_balance: fin === null ? null : Math.round((fin - recv - wo) * 10000) / 10000,
+      receivable_external: bal === null ? null : Math.round((Number(r.final_amount) - inv) * 10000) / 10000,
+      receivable_balance: bal,
       attach_summary: Attachments.summaryText(r.id),
       department_id: this.deptNameOf(r),
     };
+  },
+
+  /** 应收余额（决算未定 → null，显示「—」且不参与合计）。
+   *  单独提出来，是因为筛选与分面计数会逐行调它 —— computeRow 还要拼附件摘要，
+   *  在几千行的表上按维度反复调用会明显变慢。 */
+  balanceOf(r) {
+    const hasFinal = r.final_amount !== null && r.final_amount !== undefined && r.final_amount !== '';
+    if (!hasFinal) return null;
+    return Math.round((Number(r.final_amount) - Number(r.received_amount || 0)
+      - Number(r.writeoff_amount || 0)) * 10000) / 10000;
   },
 
   deptNameOf(r) {
@@ -69,62 +77,114 @@ const Ledger = {
     return d ? d.name : DEPT_NONE;
   },
 
-  /** 筛选后的行 */
-  filteredRows() {
-    const kw = this.filters.search.trim().toLowerCase();
-    const deptAll = this.filters.dept === '全部';
-    const deptNone = this.filters.dept === DEPT_NONE;
-    /* ⚠️ 不能只用 deptId 判断是否要筛：选「未指定」时它在部门字典里查不到，
-       deptId 为 undefined，旧写法会当成"不做筛选"，于是点「未指定」列出全部行。 */
-    const deptId = (deptAll || deptNone) ? null
-      : (this.departments.find(d => d.name === this.filters.dept) || {}).id;
-    return this.rows.filter(r => {
-      if (this.filters.batch && r.batch_id !== this.filters.batch) return false;
-      // 结清状态（CONTEXT.md「记录生命周期」）：未结 = 应收余额 ≠ 0 或决算未定（余额不可知）
-      if (this.filters.settled === '未结') {
-        const bal = this.computeRow(r).receivable_balance;
-        if (bal === 0) return false;
-      } else if (this.filters.settled === '已结清') {
-        const bal = this.computeRow(r).receivable_balance;
-        if (bal !== 0) return false;
-      }
+  /* ================= 筛选维度 =================
+     每个维度与 filters 同名；取什么值由 dimValue 决定；「全部」= 该维度不设条件。
+     默认值 def 只影响 chip 的高亮（未结是结清状态的默认，不是"没筛过"）。 */
+
+  DIMS: [
+    { key: 'dept',           label: '部门' },
+    { key: 'settled',        label: '结清状态', def: '未结' },
+    { key: 'project_status', label: '项目状态' },
+    { key: 'debt_status',    label: '债权状态' },
+    { key: 'client_attr',    label: '客户属性' },
+  ],
+
+  dimDef(key) { return this.DIMS.find(d => d.key === key) || { key, label: key }; },
+  dimDefault(key) { return this.dimDef(key).def || '全部'; },
+  isDefaultDim(key) { return this.filters[key] === this.dimDefault(key); },
+
+  /** 某维度上「这一行属于哪个选项」—— 显示什么就按什么筛，两端共用同一个口径 */
+  dimValue(key, r) {
+    if (key === 'dept') return this.deptNameOf(r);
+    if (key === 'settled') return this.balanceOf(r) === 0 ? '已结清' : '未结';
+    if (key === 'client_attr') return (r.client_attr && String(r.client_attr).trim()) || '未填写';
+    return r[key] || '未填写';
+  },
+
+  /** 单行是否命中当前筛选；skip 指定本次忽略哪个维度（算分面计数用） */
+  rowMatch(r, skip) {
+    const f = this.filters;
+    if (f.batch && r.batch_id !== f.batch) return false;
+
+    /* 结清状态（CONTEXT.md「记录生命周期」）：
+       未结 = 应收余额 ≠ 0 **或决算未定**（余额不可知，不能算已结清） */
+    if (skip !== 'settled' && f.settled !== '全部') {
+      const b = this.balanceOf(r);
+      if (f.settled === '未结' ? b === 0 : b !== 0) return false;
+    }
+
+    if (skip !== 'dept' && f.dept !== '全部') {
       /* 「未指定」只能按"部门名解析不出来"判断，不能按 department_id 是否为空判断 ——
          两者不等价：部门 id 存在但字典里查不到（字典未加载全 / 跨标签页新增的部门）
-         同样会显示成「未指定」。显示与筛选必须用同一个口径，否则点「未指定」筛不出
-         屏幕上明明写着「未指定」的行。 */
-      if (deptNone) { if (this.deptNameOf(r) !== DEPT_NONE) return false; }
-      else if (deptId && r.department_id !== deptId) return false;
-      if (this.filters.project_status !== '全部' && (r.project_status || '未填写') !== this.filters.project_status) return false;
-      if (this.filters.debt_status !== '全部' && (r.debt_status || '未填写') !== this.filters.debt_status) return false;
-      if (this.filters.client_attr !== '全部' && (r.client_attr && String(r.client_attr).trim() || '未填写') !== this.filters.client_attr) return false;
-      if (kw) {
-        const hay = [r.contract_no, r.project_name, r.owner_unit, r.creditor_unit,
-          r.collector, r.feedback, r.latest_progress, r.next_plan, r.remark, this.deptNameOf(r)]
-          .map(x => String(x || '').toLowerCase()).join(' ');
-        if (!hay.includes(kw)) return false;
+         同样会显示成「未指定」。显示与筛选必须同一个口径。 */
+      if (f.dept === DEPT_NONE) {
+        if (this.deptNameOf(r) !== DEPT_NONE) return false;
+      } else {
+        const d = this.departments.find(x => x.name === f.dept);
+        /* 选中的部门名在部门表里查不到（部门被删或改过名）→ 命中 0 条，
+           而不是"当成没筛"。空状态会给出可点击的清除建议。 */
+        if (!d || r.department_id !== d.id) return false;
       }
-      return true;
-    });
+    }
+
+    if (skip !== 'project_status' && f.project_status !== '全部'
+        && this.dimValue('project_status', r) !== f.project_status) return false;
+    if (skip !== 'debt_status' && f.debt_status !== '全部'
+        && this.dimValue('debt_status', r) !== f.debt_status) return false;
+    if (skip !== 'client_attr' && f.client_attr !== '全部'
+        && this.dimValue('client_attr', r) !== f.client_attr) return false;
+
+    const kw = f.search.trim().toLowerCase();
+    if (kw) {
+      const hay = [r.contract_no, r.project_name, r.owner_unit, r.creditor_unit,
+        r.collector, r.feedback, r.latest_progress, r.next_plan, r.remark, this.deptNameOf(r)]
+        .map(x => String(x || '').toLowerCase()).join(' ');
+      if (!hay.includes(kw)) return false;
+    }
+    return true;
   },
 
-  /** 部门胶囊选项（按记录数排序） */
-  deptCaps() {
-    const counter = {};
+  /** 筛选后的行 */
+  filteredRows() { return this.rows.filter(r => this.rowMatch(r, null)); },
+
+  /** 分面计数：在「其他维度已生效」的前提下，本维度各选项各能筛出多少条。
+   *  ⚠️ 这是本次修复的关键。旧胶囊上写的是"这个部门一共有几条"，与默认「未结」
+   *  叠加后实际可能一条都筛不出来，点进去一片空白 —— 用户以为筛选坏了。
+   *  现在下拉里每个选项后面的数字都是"点下去真能看到几条"。 */
+  facetCounts(key) {
+    const c = new Map();
     this.rows.forEach(r => {
-      const k = this.deptNameOf(r);
-      counter[k] = (counter[k] || 0) + 1;
+      if (!this.rowMatch(r, key)) return;
+      const k = this.dimValue(key, r);
+      c.set(k, (c.get(k) || 0) + 1);
     });
-    return Object.entries(counter).sort((a, b) => b[1] - a[1]).map(e => e[0]);
+    return c;
   },
 
-  /** 客户属性胶囊选项（取自实际数据，按记录数排序） */
-  attrCaps() {
-    const counter = {};
-    this.rows.forEach(r => {
-      const k = r.client_attr && String(r.client_attr).trim() || '未填写';
-      counter[k] = (counter[k] || 0) + 1;
-    });
-    return Object.entries(counter).sort((a, b) => b[1] - a[1]).map(e => e[0]);
+  /** 本维度选「全部」时的条数（= 其他维度筛完还剩多少） */
+  facetTotal(key) {
+    let n = 0;
+    this.rows.forEach(r => { if (this.rowMatch(r, key)) n++; });
+    return n;
+  },
+
+  /** 某维度的可选项（只列数据里真实出现的值 —— 字典里有、一条数据都没有的选项
+   *  在筛选器里只会挤占地方） */
+  dimOptions(key) {
+    const counts = this.facetCounts(key);
+    let vals = [...counts.keys()];
+    if (key === 'dept') {
+      const ord = new Map(this.departments.map((d, i) => [d.name, i]));
+      vals.sort((a, b) => (ord.has(a) ? ord.get(a) : 9998) - (ord.has(b) ? ord.get(b) : 9998));
+      vals = [...vals.filter(v => v !== DEPT_NONE), ...vals.filter(v => v === DEPT_NONE)];
+    } else {
+      vals.sort((a, b) => (counts.get(b) - counts.get(a)) || String(a).localeCompare(String(b), 'zh'));
+    }
+    const cur = this.filters[key];
+    const opts = [{ val: '全部', count: this.facetTotal(key), active: cur === '全部' }];
+    vals.forEach(v => opts.push({ val: v, count: counts.get(v) || 0, active: cur === v }));
+    if (cur !== '全部' && !vals.includes(cur)) opts.push({ val: cur, count: 0, active: true });
+    return opts;
   },
 
   /* ================= 渲染 ================= */
@@ -149,34 +209,170 @@ const Ledger = {
       </div>`;
   },
 
-  renderCapsules() {
-    const depts = this.deptCaps();
-    const attrs = this.attrCaps();
-    const statuses = ['全部', ...Dicts.get('project_status')];
-    const debts = ['全部', ...Dicts.get('debt_status')];
-    /* 「全部 / 未结」是本维度的默认值，命中默认值的选中态用淡色（见 .capsule.is-default）：
-       实心蓝只留给"这一维真的被筛过"，于是颜色本身就成了信息 —— 默认状态下一眼是素的 */
-    const cap = (group, val, cur) => {
-      const isDefault = val === (group === 'settled' ? '未结' : '全部');
-      const on = val === cur;
-      const label = { dept: '部门', settled: '结清状态', project_status: '项目状态',
-                      debt_status: '债权状态', client_attr: '客户属性' }[group];
-      return `<button class="capsule ${on ? 'active' : ''} ${on && isDefault ? 'is-default' : ''}"
-        data-group="${group}" data-val="${Utils.escapeHtml(val)}" aria-pressed="${on}"
-        aria-label="${label}：${Utils.escapeHtml(val)}">${Utils.escapeHtml(val)}</button>`;
-    };
-    return `
-      <div class="capsule-row"><span class="capsule-label">部门</span>${depts.length ? [cap('dept', '全部', this.filters.dept), ...depts.map(d => cap('dept', d, this.filters.dept))].join('') : '<span class="muted">暂无数据</span>'}</div>
-      <div class="capsule-row"><span class="capsule-label">结清状态</span>${['未结', '已结清', '全部'].map(s => cap('settled', s, this.filters.settled)).join('')}</div>
-      <div class="capsule-row"><span class="capsule-label">项目状态</span>${statuses.map(p => cap('project_status', p, this.filters.project_status)).join('')}</div>
-      <div class="capsule-row"><span class="capsule-label">债权状态</span>${debts.map(s => cap('debt_status', s, this.filters.debt_status)).join('')}</div>
-      <div class="capsule-row"><span class="capsule-label">客户属性</span>${attrs.length ? [cap('client_attr', '全部', this.filters.client_attr), ...attrs.map(a => cap('client_attr', a, this.filters.client_attr))].join('') : '<span class="muted">暂无数据</span>'}</div>`;
+  /** 筛选条（一行）：每个维度一个 chip，点开才是胶囊选项。
+   *  原先 5 行胶囊平铺 —— 部门一变多就糊成一片（31 个部门会占掉 4~5 行），
+   *  而且看不到"点下去能筛出几条"，正是本次两个诉求的来源。 */
+  filterBarHTML() {
+    const chips = this.DIMS.map(d => {
+      const cur = this.filters[d.key];
+      const set = !this.isDefaultDim(d.key);
+      /* 计数只在本维度真的被筛过时才算：默认状态下不算，省掉一次全表扫描 */
+      const zero = set && (this.facetCounts(d.key).get(cur) || 0) === 0;
+      return `<button class="fb-chip${set ? ' is-set' : ''}${zero ? ' is-zero' : ''}"
+        data-dim="${d.key}" aria-haspopup="true" aria-expanded="false"
+        title="${d.label}：${Utils.escapeHtml(cur)}${zero ? '（当前条件下没有记录，点开可看原因）' : '（点击选择）'}"
+        ><span class="fb-lab">${d.label}</span><b class="fb-val">${Utils.escapeHtml(cur)}</b>${
+        zero ? '<span class="fb-zero" aria-hidden="true">0</span>' : ''
+      }<span class="fb-caret" aria-hidden="true">▾</span></button>`;
+    }).join('');
+
+    const shown = this.filteredRows().length, total = this.rows.length;
+    return `${chips}
+      <span class="fb-sum" id="fb-sum">${shown === total
+        ? `共 ${total} 条`
+        : `共 ${total} 条 · 筛选后 <b>${shown}</b> 条`}</span>
+      ${this.hasActiveFilter() ? '<a class="fb-clear" data-act="clear-filters">清除筛选</a>' : ''}`;
   },
 
-  /** 当前显示的列定义（列设置过滤后） */
-  visibleDefs() {
-    return [...FIELD_DEFS, ...COMPUTED_DEFS].filter(f => ColPrefs.isVisible(f.key));
+  /** 只重画筛选条（筛选变化后调用；表格另算） */
+  syncFilterBar() {
+    const bar = document.getElementById('filter-bar');
+    if (!bar) return;
+    this.closeDimPop();
+    bar.innerHTML = this.filterBarHTML();
+    this.bindFilterBar(bar);
   },
+
+  bindFilterBar(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-dim]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (document.getElementById('fb-pop') && this._popDim === btn.dataset.dim) { this.closeDimPop(); return; }
+        this.openDimPop(btn.dataset.dim, btn);
+      });
+    });
+    const clear = root.querySelector('[data-act="clear-filters"]');
+    if (clear) clear.addEventListener('click', () => {
+      this.DIMS.forEach(d => { this.filters[d.key] = this.dimDefault(d.key); });
+      this.filters.search = '';
+      const kw = document.getElementById('kw-input');
+      if (kw) kw.value = '';
+      this.syncFilterBar();
+      this.refreshTable();
+    });
+  },
+
+  /** 维度选项面板：胶囊 + 计数（「未指定」等长列表再加个搜索框） */
+  openDimPop(dimKey, anchor) {
+    this.closeDimPop();
+    const d = this.dimDef(dimKey);
+    const opts = this.dimOptions(dimKey);
+    const el = document.createElement('div');
+    el.id = 'fb-pop';
+    el.className = 'fb-pop';
+    el.innerHTML = `
+      <div class="fb-pop-head"><span>${d.label}</span>
+        <span class="fb-pop-tip">数字 = 点下去能筛出几条</span></div>
+      ${opts.length > 9 ? '<input class="fb-search" placeholder="输入关键词过滤选项…" aria-label="过滤选项">' : ''}
+      <div class="fb-opts">
+        ${opts.map(o => {
+          const isDefault = o.val === this.dimDefault(dimKey);
+          /*
+            0 条的选项淡化但仍可点：它正是"部门没问题、是被默认「未结」挡住了"的证据，
+            点下去空状态会直接告诉用户该放开哪一个维度。 */
+          return `<button class="capsule${o.active ? ' active' : ''}${o.active && isDefault ? ' is-default' : ''}${!o.count ? ' is-zero' : ''}"
+            data-val="${Utils.escapeHtml(o.val)}" aria-pressed="${o.active}"
+            >${Utils.escapeHtml(o.val)}<span class="fb-cnt">${o.count}</span></button>`;
+        }).join('')}
+      </div>`;
+    document.body.appendChild(el);
+    this._popDim = dimKey;
+    this._popAnchor = anchor;
+    this.placePop(el, anchor);
+    anchor.setAttribute('aria-expanded', 'true');
+
+    el.querySelectorAll('.capsule').forEach(c => c.addEventListener('click', () => {
+      this.filters[dimKey] = c.dataset.val;
+      this.closeDimPop();
+      this.syncFilterBar();
+      this.refreshTable();
+    }));
+
+    const search = el.querySelector('.fb-search');
+    if (search) search.addEventListener('input', () => {
+      const kw = search.value.trim().toLowerCase();
+      el.querySelectorAll('.capsule').forEach(c => {
+        c.classList.toggle('hidden', !!kw && !c.textContent.toLowerCase().includes(kw));
+      });
+    });
+
+    document.addEventListener('mousedown', this._popOutside = e => {
+      if (el.contains(e.target) || (anchor && anchor.contains(e.target))) return;
+      this.closeDimPop();
+    });
+    document.addEventListener('keydown', this._popEsc = e => { if (e.key === 'Escape') this.closeDimPop(); });
+  },
+
+  closeDimPop() {
+    const el = document.getElementById('fb-pop');
+    if (el) el.remove();
+    if (this._popAnchor) { this._popAnchor.setAttribute('aria-expanded', 'false'); this._popAnchor = null; }
+    this._popDim = null;
+    if (this._popOutside) { document.removeEventListener('mousedown', this._popOutside); this._popOutside = null; }
+    if (this._popEsc) { document.removeEventListener('keydown', this._popEsc); this._popEsc = null; }
+  },
+
+  placePop(el, anchor) {
+    const r = anchor.getBoundingClientRect();
+    const w = el.offsetWidth || 260, h = el.offsetHeight || 200;
+    const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+    const x = Math.max(8, Math.min(r.left + window.scrollX, window.scrollX + vw - w - 12));
+    let y = r.bottom + 6 + window.scrollY;
+    if (r.bottom + 6 + h > vh) y = Math.max(window.scrollY + 8, window.scrollY + vh - h - 12);
+    el.style.left = Math.round(x) + 'px';
+    el.style.top = Math.round(y) + 'px';
+  },
+
+  /** 筛出 0 条时，逐个维度松一松试试 —— 告诉用户"放开哪一个就能看到几条"。
+   *  这就是用户报的「部门筛选有问题」：部门没筛错，是默认「未结」把它挡在外面了。
+   *
+   *  两个容易写错的地方：
+   *  ① 不能跳过"还停在默认值"的维度。挡住用户的往往正是默认值（本项目的
+   *     「结清状态 = 未结」），跳过它等于永远给不出正确解释，只会建议去放宽
+   *     用户亲手选的那一维 —— 反而让他以为筛选坏了。
+   *  ② 排序按条数**从少到多**。最少条数的那个才是最贴近用户意图的解释：
+   *     「放宽结清状态可看到 1 条」说明"你要的这条在，只是被挡住了"；
+   *     而「放宽部门可看到 80 条」会把人带偏成"部门筛错了"。 */
+  diagnoseEmpty() {
+    const f = this.filters;
+    const tips = [];
+    if (f.dept !== '全部' && f.dept !== DEPT_NONE && !this.departments.some(d => d.name === f.dept)) {
+      tips.push({ n: 0, label: `所选部门「${f.dept}」已不在部门表中，点此清除`, patch: { dept: '全部' } });
+    }
+    this.DIMS.forEach(d => {
+      const saved = f[d.key];
+      if (saved === '全部') return;                    // 本来就没限制，松它没有意义
+      f[d.key] = '全部';
+      const n = this.filteredRows().length;
+      f[d.key] = saved;
+      if (n > 0) tips.push({ n, label: `把「${d.label}」放宽到「全部」可看到 ${n} 条`, patch: { [d.key]: '全部' } });
+    });
+    if (f.search.trim()) {
+      const saved = f.search;
+      f.search = '';
+      const n = this.filteredRows().length;
+      f.search = saved;
+      if (n > 0) tips.push({ n, label: `清空搜索关键词可看到 ${n} 条`, patch: { search: '' } });
+    }
+    this._emptyTips = tips.slice()
+      .sort((a, b) => a.n - b.n)                       // 最"贴身"的解释排第一
+      .slice(0, 3);
+    return this._emptyTips;
+  },
+
+  /** 当前显示的列定义（已按用户的列顺序排列） */
+  visibleDefs() { return ColPrefs.visibleDefs(); },
 
   renderTable() {
     const rows = this.filteredRows();
@@ -184,11 +380,23 @@ const Ledger = {
     const allChecked = rows.length > 0 && rows.every(r => this.selected.has(r.id));
     const defs = this.visibleDefs();
 
+    /* 左侧冻结列：勾选 + 序号是固定前置，其后是用户在「列设置」里指定的列。
+       顺序与冻结区都由 ColPrefs 维护（冻结区永远是渲染顺序的前一段），
+       这里只把 fz-i 序号挂到单元格上 —— 真正的 left 偏移由 syncFrozen() 用
+       **实测宽度**算（声明宽度会被 table-layout:auto 回缩，详见 style.css）。 */
+    const frozenKeys = ColPrefs.frozenVisible();
+    const fzOf = new Map();
+    defs.forEach(f => { if (frozenKeys.includes(f.key)) fzOf.set(f.key, fzOf.size); });
+    const lastFz = [...fzOf.keys()].pop();
+    const fzCls = key => fzOf.has(key)
+      ? ` is-frozen fz-${fzOf.get(key)}${key === lastFz ? ' is-fz-last' : ''}` : '';
+    const idxCls = fzOf.size ? '' : ' is-fz-last';   // 没有用户冻结列时，序号列就是冻结区最后一列
+
     const headCells = [
       `<th class="col-check"><input type="checkbox" id="check-all" ${allChecked ? 'checked' : ''}></th>`,
-      `<th class="col-idx">序</th>`,
+      `<th class="col-idx${idxCls}">序</th>`,
       ...defs.map(f =>
-        `<th style="min-width:${f.width}px;max-width:${f.width}px" class="${f.type === 'money' || f.type === 'date' ? 'ta-r' : ''} ${f.key === this.sortKey ? 'sorted' : ''}" data-sort="${f.key}">${f.label}</th>`),
+        `<th style="min-width:${f.width}px;max-width:${f.width}px" class="${f.type === 'money' || f.type === 'date' ? 'ta-r ' : ''}${f.key === this.sortKey ? 'sorted' : ''}${fzCls(f.key)}" data-sort="${f.key}">${f.label}</th>`),
       `<th class="col-actions">操作</th>`,
     ].join('');
 
@@ -196,9 +404,10 @@ const Ledger = {
       const checked = this.selected.has(r.id);
       const comp = this.computeRow(r);
       const cells = defs.map(f => {
+        const ex = fzCls(f.key);
         if (f.key === 'attach_summary') {
           const n = Attachments.count(r.id);
-          return `<td title="${Utils.escapeHtml(comp.attach_summary)}" class="${n ? 'att-has' : 'muted'}">${n ? `📎 ${Utils.escapeHtml(comp.attach_summary)}` : '—'}</td>`;
+          return `<td title="${Utils.escapeHtml(comp.attach_summary)}" class="${n ? 'att-has' : 'muted'}${ex}">${n ? `📎 ${Utils.escapeHtml(comp.attach_summary)}` : '—'}</td>`;
         }
         /* 派生列（归属部门）取值以 computeRow 为准 —— 与排序比较器、Exporter.valueOf
            同一口径。若直接读 r[f.key]，department_id 会渲染成 UUID 原文。 */
@@ -206,25 +415,24 @@ const Ledger = {
         if (f.type === 'money') {
           const isCalc = f.key in comp;
           const val = isCalc ? comp[f.key] : v;
-          if (isCalc && val === null) return `<td class="ta-r td-money muted" title="决算金额未定，暂不计算">—</td>`;
+          if (isCalc && val === null) return `<td class="ta-r td-money muted${ex}" title="决算金额未定，暂不计算">—</td>`;
           const neg = Number(val) < 0;
-          return `<td class="ta-r td-money ${neg ? 'neg' : ''}">${Utils.fmtMoney(val)}</td>`;
+          return `<td class="ta-r td-money${neg ? ' neg' : ''}${ex}">${Utils.fmtMoney(val)}</td>`;
         }
-        if (f.type === 'date') return `<td class="ta-r td-date">${Utils.escapeHtml(v || '')}</td>`;
-        if (f.key === 'project_name') return `<td class="td-name" title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(Utils.clampName(v))}</td>`;
+        if (f.type === 'date') return `<td class="ta-r td-date${ex}">${Utils.escapeHtml(v || '')}</td>`;
+        if (f.key === 'project_name') return `<td class="td-name${ex}" title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(Utils.clampName(v))}</td>`;
         /* 归属部门为空时（多为导入时部门名对不上）用警示色标出来 ——
-           原先和普通单元格一个样子，整列「未指定」不容易被察觉。
            判据取 comp.department_id（= deptNameOf 的结果，即该格真实显示值），
            与部门胶囊「未指定」的筛选口径严格一致。 */
         if (f.key === 'department_id') {
           const none = v === DEPT_NONE;
-          return `<td class="td-dept${none ? ' is-none' : ''}" title="${Utils.escapeHtml(none ? '这条记录没有归属部门' : v)}">${Utils.escapeHtml(v || '')}</td>`;
+          return `<td class="td-dept${none ? ' is-none' : ''}${ex}" title="${Utils.escapeHtml(none ? '这条记录没有归属部门' : v)}">${Utils.escapeHtml(v || '')}</td>`;
         }
         if ((f.key === 'project_status' || f.key === 'debt_status') && v) {
           const cls = TAG_COLORS[v] || 'tag-gray';
-          return `<td><span class="tag ${cls}">${Utils.escapeHtml(v)}</span></td>`;
+          return `<td class="${ex.trim()}"><span class="tag ${cls}">${Utils.escapeHtml(v)}</span></td>`;
         }
-        return `<td class="${f.cls || ''}" title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(v || '')}</td>`;
+        return `<td class="${f.cls || ''}${ex}" title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(v || '')}</td>`;
       }).join('');
       const actions = `
         <td class="col-actions">
@@ -233,42 +441,30 @@ const Ledger = {
         </td>`;
       return `<tr data-id="${r.id}" class="${checked ? 'row-checked' : ''}">
         <td class="col-check"><input type="checkbox" class="row-check" data-id="${r.id}" ${checked ? 'checked' : ''}></td>
-        <td class="col-idx">${i + 1}</td>
+        <td class="col-idx${idxCls}">${i + 1}</td>
         ${cells}${actions}
       </tr>`;
     }).join('');
 
     // 合计行（当前筛选范围）：金额列 + 计算金额列
-    const sum = key => rows.reduce((s, r) => {
-      const f = defs.find(x => x.key === key);
-      const v = (f && key in this.computeRow(r)) ? this.computeRow(r)[key] : r[key];
-      return s + Number(v || 0);
-    }, 0);
+    const sums = new Map();
+    defs.filter(f => f.type === 'money').forEach(f => {
+      sums.set(f.key, rows.reduce((s, r) => {
+        const comp = this.computeRow(r);
+        const v = (f.key in comp) ? comp[f.key] : r[f.key];
+        return s + Number(v || 0);
+      }, 0));
+    });
     const footCells = [
       '<td colspan="2" class="ta-r td-foot td-foot-label">合计</td>',
       ...defs.map(f => f.type === 'money'
-        ? `<td class="ta-r td-money td-foot">${Utils.fmtMoney(sum(f.key))}</td>`
-        : '<td></td>'),
+        ? `<td class="ta-r td-money td-foot${fzCls(f.key)}">${Utils.fmtMoney(sums.get(f.key))}</td>`
+        : `<td class="${fzCls(f.key).trim()}"></td>`),
       '<td></td>',
     ].join('');
 
-    /* 空状态：不放进表格里。
-       台账表宽可达 3000px+，而 <td colspan="N"> 里的居中内容会落在
-       整表的中点（约 x=1700），落在可视区之外 —— 也就是"一片空白什么都没有"。
-       改为独立面板，在可见区域内居中。 */
     if (!rows.length) {
-      const noRows = this.hasActiveFilter();
-      return `
-      <div class="table-wrap is-empty">
-        <div class="empty-state">
-          <span class="es-badge" aria-hidden="true">▤</span>
-          <p class="es-title">${noRows ? '当前筛选条件下没有记录' : '台账还没有记录'}</p>
-          <p class="es-hint">${noRows
-            ? '把「结清状态」切回「未结」或「全部」，或清空搜索关键词'
-            : '点「＋ 新增记录」逐条录入，或用「⇪ 导入 Excel」批量导入'}</p>
-        </div>
-      </div>
-      <div class="table-status">${this.statusText(rows)}</div>`;
+      return this.renderEmpty() + `<div class="table-status">${this.statusText(rows)}</div>`;
     }
     return `
       <div class="table-wrap">
@@ -279,6 +475,30 @@ const Ledger = {
         </table>
       </div>
       <div class="table-status">${this.statusText(rows)}</div>`;
+  },
+
+  /** 空状态：不放进表格里。
+      台账表宽可达 3000px+，而 <td colspan="N"> 里的居中内容会落在整表的中点
+      （约 x=1700），落在可视区之外 —— 也就是"一片空白什么都没有"。
+      改为独立面板，并把"该放开哪个维度"直接做成可点的按钮。 */
+  renderEmpty() {
+    if (!this.rows.length) {
+      return `<div class="table-wrap is-empty"><div class="empty-state">
+        <span class="es-badge" aria-hidden="true">▤</span>
+        <p class="es-title">台账还没有记录</p>
+        <p class="es-hint">点「＋ 新增记录」逐条录入，或用「⇪ 导入 Excel」批量导入</p>
+      </div></div>`;
+    }
+    const tips = this.diagnoseEmpty();
+    return `<div class="table-wrap is-empty"><div class="empty-state">
+      <span class="es-badge" aria-hidden="true">▤</span>
+      <p class="es-title">当前筛选条件下没有记录</p>
+      <p class="es-hint">共 ${this.rows.length} 条记录，被下面的条件挡在外面了：</p>
+      ${tips.length
+        ? `<div class="es-actions">${tips.map((t, i) =>
+            `<button class="btn btn-sm" data-act="relax" data-idx="${i}">${Utils.escapeHtml(t.label)}</button>`).join('')}</div>`
+        : '<p class="es-hint">把搜索关键词清空试试</p>'}
+    </div></div>`;
   },
 
   /** 表格下沿的状态条：总数 / 筛选后 / 已选 / 隐藏列（隐藏列提示用右侧淡字，避免用户以为列丢了） */
@@ -303,6 +523,80 @@ const Ledger = {
     wrap.classList.toggle('has-more', max > 1 && wrap.scrollLeft < max - 2);
   },
 
+  /** 冻结列的 left 偏移必须严格等于「它前面所有冻结列的实际渲染宽度」之和。
+   *  ⚠️ 不能拿声明宽度直接算：本表是 table-layout:auto，浏览器会把列宽向内容
+   *  最小宽度回缩（勾选列声明 36px 只画到 29px），偏移比列宽大或小都会露出
+   *  一条正在横向滚动的单元格 —— 表现为「序号列右边有一片空白 / 穿帮」。
+   *  所以这里量一次真实宽度，再把偏移写成 CSS 规则（.fz-i）。 */
+  syncFrozen() {
+    const wrap = document.querySelector('#ledger-table-box .table-wrap');
+    const table = wrap && wrap.querySelector('.ledger-table');
+    const headRow = table && table.querySelector('thead tr');
+    if (!headRow) return;
+
+    const cells = [...headRow.children];
+    const w = el => (el ? Math.round(el.getBoundingClientRect().width * 100) / 100 : 0);
+    const hasOverflow = wrap.scrollWidth > wrap.clientWidth + 1;
+
+    const chk = cells.find(th => th.classList.contains('col-check'));
+    const idx = cells.find(th => th.classList.contains('col-idx'));
+    const userFrozen = cells.filter(th => th.classList.contains('is-frozen'));
+
+    /* 勾选列与序号列的宽度写在同一个变量上（宽度与 left 共用），
+       只在出现横向滚动时才回写：那时各列宽度之和必然大于容器，
+       浏览器不会再去分配多余空间，回写不会引起二次回流；
+       而表格窄到不需要横向滚动时，偏移本来就无所谓。 */
+    if (hasOverflow) {
+      if (chk) table.style.setProperty('--fc-check', w(chk) + 'px');
+      if (idx) table.style.setProperty('--fc-idx', w(idx) + 'px');
+      table.style.setProperty('--fc-w', (w(chk) + w(idx)) + 'px');
+    }
+
+    const offsets = [];
+    let acc = w(chk) + w(idx);
+    userFrozen.forEach((th, i) => { offsets[i] = acc; acc = Math.round((acc + w(th)) * 100) / 100; });
+    let st = document.getElementById('cfz-style');
+    if (!st) {
+      st = document.createElement('style');
+      st.id = 'cfz-style';
+      document.head.appendChild(st);
+    }
+    st.textContent = offsets
+      .map((left, i) => `.ledger-table .fz-${i} { left: ${left}px; }`)
+      .join('\n');
+  },
+
+  /** 让台账页恰好填满「顶栏以下、页面内边距以内」的高度。
+      这一步是「表头常驻」的前提：#page-ledger 原先写的是 height:100%，
+      但它的上一层（.app-main）高度由内容决定，百分比解析不出具体值，
+      于是 .table-wrap 的 max-height:100% 退化成 none —— 表格没有内部滚动区，
+      整页往下滚、表头跟着滚走（用户看到的现象），横向滚动条则被推到
+      数千像素高的表格最底部，很难够得着。
+      这里把可用高度量成 px，弹性链有确定值，滚动区就落在表格卡片内部。
+
+      高度用**实测**而不是"视口高 − 顶栏 − 上下内边距"的算术推导：算术法只要
+      上方有任何一处没被算进去（提示条、外边距、弹性间距、以后新增的一条
+      工具行），就会溢出几像素 —— 页面立刻多出一条滚动条，用户抱怨的
+      「容器不要有滚动栏」就又回来了。改法是先把内联高度撤掉、量出页面的
+      自然顶边，再用「可用高度 − 顶边 − 下内边距」得出高度；上方多出什么
+      都自然被包含进去。 */
+  fitHeight() {
+    const page = document.getElementById('page-ledger');
+    if (!page) return;
+    page.style.height = '';                            // 撤掉旧值，量自然顶边
+    const rect = page.getBoundingClientRect();
+    const top = rect.top + (window.scrollY || 0);
+    const holder = page.parentElement;                 // .page-container
+    const cs = getComputedStyle(holder || page);
+    const padB = parseFloat(cs.paddingBottom) || 0;
+    const mb = parseFloat(getComputedStyle(page).marginBottom) || 0;
+    /* 可用高度取 documentElement.clientHeight：若此刻已有滚动条，它会自动
+       被扣掉，于是下一次算出的高度更小、滚动条消失、再量又变准 —— 收敛。
+       不会来回抖，因为"高度恰好等于可用值"本身就满足 scrollHeight === clientHeight。 */
+    const vh = document.documentElement.clientHeight || window.innerHeight;
+    page.style.height = Math.max(320, Math.round(vh - top - padB - mb)) + 'px';
+  },
+
   /** 表格重建后重新挂滚动监听（节点是新的，旧监听随之作废） */
   bindOverflow() {
     const wrap = document.querySelector('#ledger-table-box .table-wrap');
@@ -312,36 +606,61 @@ const Ledger = {
     }
     if (!this._resizeBound) {
       this._resizeBound = true;
-      window.addEventListener('resize', Utils.debounce(() => this.syncOverflow(), 150));
+      const onResize = Utils.debounce(() => {
+        if (document.getElementById('page-ledger')?.classList.contains('hidden')) return;
+        this.fitHeight();
+        this.syncOverflow();
+        this.syncFrozen();
+      }, 150);
+      window.addEventListener('resize', onResize);
+      /* 顶栏高度会变（部门胶囊换行），它一变可用高度就变 */
+      if (typeof ResizeObserver !== 'undefined') {
+        const tb = document.querySelector('.topbar');
+        if (tb) new ResizeObserver(Utils.debounce(() => {
+          if (document.getElementById('page-ledger')?.classList.contains('hidden')) return;
+          this.fitHeight(); this.syncFrozen();
+        }, 150)).observe(tb);
+      }
     }
   },
 
-  /** 是否有生效的筛选条件（用于区分「筛选无结果」与「真的没有数据」） */
+  /** 是否有生效的筛选条件（只要有一个维度离开了它的默认值） */
   hasActiveFilter() {
     const f = this.filters;
-    return !!(f.search.trim() || f.dept !== '全部' || f.project_status !== '全部'
-      || f.debt_status !== '全部' || f.client_attr !== '全部' || f.settled !== '全部' || f.batch);
+    return !!(f.search.trim() || f.batch || this.DIMS.some(d => f[d.key] !== this.dimDefault(d.key)));
   },
 
   render() {
     const main = document.getElementById('page-ledger');
     if (!main) return;
-    main.innerHTML = this.renderToolbar() + this.renderCapsules() + '<div id="ledger-table-box">' + this.renderTable() + '</div>';
+    this.fitHeight();
+    main.innerHTML = this.renderToolbar()
+      + `<div class="filterbar" id="filter-bar">${this.filterBarHTML()}</div>`
+      + '<div id="ledger-table-box">' + this.renderTable() + '</div>';
     this.bindEvents(main);
+    this.bindFilterBar(main);
     this.bindOverflow();
+    this.syncFrozen();
   },
 
-  /** 只刷新表格区（筛选/勾选变化时避免整页重绘导致输入框失焦） */
+  /** 只刷新表格区（筛选/勾选变化时避免整页重绘导致搜索框失焦、
+      也会让「列设置」面板丢掉锚点按钮） */
   refreshTable() {
     const box = document.getElementById('ledger-table-box');
+    const keepLeft = box?.querySelector('.table-wrap')?.scrollLeft || 0;   // 重绘会丢横向位置
     if (box) box.innerHTML = this.renderTable();
+    const nw = document.querySelector('#ledger-table-box .table-wrap');
+    if (nw && keepLeft) nw.scrollLeft = keepLeft;
     const btn = document.querySelector('[data-act="batch-del"]');
     if (btn) {
       btn.textContent = `删除选中（${this.selected.size}）`;
       btn.disabled = !this.selected.size;
     }
+    const cpb = document.getElementById('btn-colprefs');   // 隐藏列数会变
+    if (cpb) cpb.textContent = '▦ 列设置' + (ColPrefs.hiddenCount() ? `（隐${ColPrefs.hiddenCount()}）` : '');
     this.bindTableEvents(box);
     this.bindOverflow();
+    this.syncFrozen();
   },
 
   /* ================= 事件 ================= */
@@ -350,19 +669,9 @@ const Ledger = {
     const kw = root.querySelector('#kw-input');
     if (kw) kw.addEventListener('input', Utils.debounce(e => {
       this.filters.search = e.target.value;
+      this.syncFilterBar();      // 计数与「筛选后 N 条」跟着搜索变
       this.refreshTable();
     }, 250));
-
-    root.querySelectorAll('.capsule').forEach(c => c.addEventListener('click', () => {
-      const g = c.dataset.group, v = c.dataset.val;
-      this.filters[g] = v;
-      root.querySelectorAll(`.capsule[data-group="${g}"]`).forEach(x => {
-        const on = x === c;
-        x.classList.toggle('active', on);
-        x.setAttribute('aria-pressed', String(on));
-      });
-      this.refreshTable();
-    }));
 
     root.querySelectorAll('[data-act]').forEach(el => {
       const act = el.dataset.act;
@@ -370,7 +679,8 @@ const Ledger = {
       if (act === 'add' && Auth.can('add')) el.addEventListener('click', () => Editor.open(null));
       if (act === 'import') el.addEventListener('click', () => Importer.open());
       if (act === 'export') el.addEventListener('click', () => Exporter.open());
-      if (act === 'colprefs') el.addEventListener('click', () => ColPrefs.openPanel(el, () => this.render()));
+      /* 回调只重绘表格区：整页重绘会把本按钮一起换掉，列设置面板就丢了锚点 */
+      if (act === 'colprefs') el.addEventListener('click', () => ColPrefs.openPanel(el, () => this.refreshTable()));
       if (act === 'exit-batch') el.addEventListener('click', () => {
         this.filters.batch = null; App.navigate('ledger'); Batches.load();
       });
@@ -382,6 +692,22 @@ const Ledger = {
 
   bindTableEvents(root) {
     if (!root) return;
+
+    /* 空状态里的「放宽某个维度」按钮：点一下就把挡路的那一项松开，
+       用户不需要自己猜是哪个筛选条件把数据挡在外面了 */
+    root.querySelectorAll('[data-act="relax"]').forEach(b => b.addEventListener('click', () => {
+      const tip = (this._emptyTips || [])[Number(b.dataset.idx)];
+      if (!tip) return;
+      Object.assign(this.filters, tip.patch);
+      if ('search' in tip.patch) {
+        const kw = document.getElementById('kw-input');
+        if (kw) kw.value = tip.patch.search;
+      }
+      this.syncFilterBar();
+      this.refreshTable();
+      Utils.toast('已放宽筛选条件', 'info');
+    }));
+
     const checkAll = root.querySelector('#check-all');
     if (checkAll) checkAll.addEventListener('change', e => {
       const rows = this.filteredRows();

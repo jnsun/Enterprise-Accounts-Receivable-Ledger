@@ -69,7 +69,7 @@ function makeChain(table) {
 }
 const sb = { from: t => makeChain(t) };
 
-const Auth = { isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1', name: '孙晋宁' } };
+const Auth = { isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1', name: '韩志远' } };
 
 (async () => {
   await Dicts.load();
@@ -209,7 +209,7 @@ body { margin: 0; padding: 0; background: var(--surface-2); }
     <header class="topbar">
       <div class="topbar-left"><div class="topbar-title">选项管理</div></div>
       <div class="topbar-user">
-        <span class="user-dept">财务资产部</span><span class="user-name">孙晋宁</span>
+        <span class="user-dept">财务资产部</span><span class="user-name">韩志远</span>
         <button class="btn btn-xs">修改密码</button><button class="btn btn-xs">退出</button>
       </div>
     </header>

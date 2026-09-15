@@ -30,21 +30,23 @@ const DEPTS = [
   { id: 'd3', name: '测绘地理信息院', sort_order: 2 }
 ];
 
+/* ⚠️ 本仓库是公开仓库，预览产物会内联这些数据。**一律用合成值**（example.com 是
+   保留域名；手机号用 138000000xx 这种一眼假的号段）。别再从真实库里粘贴。 */
 const USERS = [
-  { user_id: 'u1', email: 'jnsun@qq.com', full_name: '孙晋宁', phone: '17535938268',
+  { user_id: 'u1', email: 'admin@example.com', full_name: '韩志远', phone: '13800000001',
     department_id: null, ar_role: 'admin', ar_super_admin: true, ar_protected: true, ar_departments: null },
-  { user_id: 'u2', email: 'zhaobing@cw.com', full_name: '赵兵', phone: '13935937279',
+  { user_id: 'u2', email: 'lihai@example.com', full_name: '李海涛', phone: '13800000002',
     department_id: null, ar_role: 'admin', ar_super_admin: false, ar_protected: false, ar_departments: null },
-  { user_id: 'u3', email: 'maliya@cw.com', full_name: '马丽亚', phone: '13663590428',
+  { user_id: 'u3', email: 'wangfang@example.com', full_name: '王芳', phone: '13800000003',
     department_id: null, ar_role: 'admin', ar_super_admin: false, ar_protected: false, ar_departments: null },
-  { user_id: 'u4', email: 'pengyanju@cw.com', full_name: '彭艳菊', phone: '13466932621',
+  { user_id: 'u4', email: 'liuyang@example.com', full_name: '刘洋', phone: '13800000004',
     department_id: 'd2', ar_role: 'user', ar_super_admin: false, ar_protected: false,
     ar_departments: { name: '工程物探所' } },
-  { user_id: 'u5', email: 'wangjianjun@cw.com', full_name: '王建军', phone: '13834567890',
+  { user_id: 'u5', email: 'chenjing@example.com', full_name: '陈静', phone: '13800000005',
     department_id: 'd1', ar_role: 'user', ar_super_admin: false, ar_protected: false,
     ar_departments: { name: '财务资产部' } },
-  { user_id: 'u6', email: 'verylongemailaddress@geo-survey-cw.com', full_name: '欧阳明月',
-    phone: '13612345678', department_id: 'd3', ar_role: 'user', ar_super_admin: false,
+  { user_id: 'u6', email: 'verylongemailaddress@geo-survey.example.com', full_name: '欧阳明月',
+    phone: '13800000006', department_id: 'd3', ar_role: 'user', ar_super_admin: false,
     ar_protected: false, ar_departments: { name: '测绘地理信息院' } }
 ];
 
@@ -88,13 +90,13 @@ const Auth = {
 (async () => {
   const stage = document.getElementById('page-admin');
 
-  // ① 超级管理员视角（看自己 = 赵兵 换成 孙晋宁）
+  // ① 超级管理员视角（看自己 = 李海涛 换成 韩志远）
   Auth.isSuperAdmin = true;
   Auth.currentUser = { id: 'u1' };
   await Admin.load();
   document.getElementById('view-super').innerHTML = stage.innerHTML;
 
-  // ② 普通管理员视角（本人 = 赵兵，正是截图里的情况）
+  // ② 普通管理员视角（本人 = 李海涛，正是截图里的情况）
   Auth.isSuperAdmin = false;
   Auth.currentUser = { id: 'u2' };
   await Admin.load();
@@ -154,9 +156,9 @@ body { margin: 0; padding: 18px 20px 60px; background: var(--surface-2); }
   <br>勾选任一权限复选框，该行底部的「保存权限」按钮应点亮并提示「有未保存的修改」。
 </div>
 <div id="page-admin"></div>
-<div class="preview-h">视角 A · 超级管理员（孙晋宁）</div>
+<div class="preview-h">视角 A · 超级管理员（韩志远）</div>
 <div id="view-super"></div>
-<div class="preview-h">视角 B · 普通管理员（赵兵）</div>
+<div class="preview-h">视角 B · 普通管理员（李海涛）</div>
 <div id="view-admin"></div>
 <script>${fieldsJs}</script>
 <script>${utilsJs}</script>

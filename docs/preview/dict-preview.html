@@ -302,13 +302,16 @@ select.ipt { padding-right: 26px; cursor: pointer; }
 .user-name { font-size: var(--t-sm); font-weight: 500; color: var(--ink-700); }
 
 .page-container { padding: var(--s4) var(--s5) var(--s7); flex: 1; min-width: 0; }
-/* 台账总览：让表格吃掉剩余高度，页面自己不再产生第二条滚动条
-   （旧实现用 max-height: calc(100vh - 252px) 猜顶部控件高度，加一行筛选就错位）。
+/* 台账总览：让表格吃掉剩余高度，页面上只留**一个**滚动区（就是表格卡片本身）。
+   高度由 js/ledger.js 的 fitHeight() 量成 px 写进来（--x 由内联样式给出）：
+   先前写 height:100% 是解析不出具体值的（上层 .app-main 的高度由内容决定），
+   于是下面那句 max-height:100% 退化成 none —— 表格没有内部滚动区、整页往下滚，
+   表头跟着滚走，横向滚动条被推到几千像素高的表格最底部。现在链条有确定值，
+   表头 sticky 在卡片内生效，页面本身不再产生第二条滚动条。
    注意只给 #page-ledger 挂弹性链，不动 .page-container —— 否则看板等长页面
-   会被压成"视口高 + 内容溢出"，容器自身的底部内边距就白给了。
-   height:100% 能生效，是因为 .page-container 在 .app-main 里由 flex 定高。 */
+   会被压成"视口高 + 内容溢出"，容器自身的底部内边距就白给了。 */
 #page-ledger:not(.hidden) {
-  display: flex; flex-direction: column; height: 100%; min-height: 0;
+  display: flex; flex-direction: column; min-height: 0;
 }
 #page-ledger #ledger-table-box { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 /* 表格卡片贴着数据收边（内容高就撑满、超出才出现内滚动），
@@ -347,15 +350,71 @@ select.ipt { padding-right: 26px; cursor: pointer; }
 }
 .batch-chip a { margin-left: var(--s1); font-weight: 600; color: inherit; }
 
-/* 筛选区：5 行胶囊本身已占掉不少竖向空间，行距收紧一档把表格往上提 */
-.capsule-row {
-  display: flex; align-items: center; gap: 3px 5px; flex-wrap: wrap;
-  margin-bottom: 4px;
+/* 筛选条：恒定一行 chip，点开才是胶囊选项。
+   原先 5 行胶囊平铺（部门一变多就 4~5 行），现在每个维度只占一个 chip，
+   显示「维度名 + 当前值」，真的筛过这一维才上色。 */
+.filterbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-bottom: var(--s2); min-height: 30px;
 }
-.capsule-label {
-  font-size: var(--t-xs); color: var(--ink-400);
-  width: 56px; flex-shrink: 0; letter-spacing: 0.02em;
+.fb-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 300px;
+  padding: 4px 10px; border: 1px solid var(--line-2); border-radius: var(--r-pill);
+  background: var(--surface); color: var(--ink-500);
+  font-family: var(--font); font-size: var(--t-xs); line-height: 1.5;
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--dur-f) var(--ease), border-color var(--dur-f) var(--ease),
+              color var(--dur-f) var(--ease);
 }
+.fb-lab { color: var(--ink-400); }
+.fb-val {
+  color: var(--ink-950); font-weight: 600; min-width: 0;
+  max-width: 132px; overflow: hidden; text-overflow: ellipsis;
+}
+.fb-caret { font-size: 9px; opacity: 0.5; }
+.fb-chip:hover { border-color: var(--primary); background: var(--primary-soft); }
+.fb-chip:hover .fb-val { color: var(--primary); }
+/* 默认值（部门=全部 / 结清状态=未结）保持素色：上色只表示"这一维真的筛过" */
+.fb-chip.is-set { background: var(--primary-soft); border-color: var(--primary-line); }
+.fb-chip.is-set .fb-val, .fb-chip.is-set .fb-lab { color: var(--primary); }
+/* 选中的值在当前条件下一条也筛不出来 —— 点开就能看到每个选项的实际条数 */
+.fb-chip.is-zero { background: var(--warn-soft); border-color: var(--warn-line); }
+.fb-chip.is-zero .fb-val, .fb-chip.is-zero .fb-lab { color: oklch(42% 0.11 66); }
+.fb-zero { font-size: 10.5px; font-weight: 700; color: oklch(42% 0.13 60); }
+.fb-sum { margin-left: auto; font-size: var(--t-xs); color: var(--ink-500); }
+.fb-sum b { color: var(--ink-950); font-weight: 600; font-variant-numeric: tabular-nums; }
+.fb-clear { font-size: var(--t-xs); }
+
+/* 维度选项面板：胶囊 + 「点下去能筛出几条」 */
+.fb-pop {
+  position: absolute; z-index: 60; width: max-content; min-width: 200px; max-width: 460px;
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r3);
+  box-shadow: var(--sh2); overflow: hidden;
+}
+.fb-pop-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3);
+  padding: 9px var(--s3); border-bottom: 1px solid var(--line);
+  background: var(--surface-2); font-size: var(--t-sm); font-weight: 600; color: var(--ink-950);
+}
+.fb-pop-tip { font-size: 11.5px; font-weight: 400; color: var(--ink-500); }
+.fb-search {
+  display: block; margin: var(--s2) var(--s3) 0; width: calc(100% - 2 * var(--s3));
+  padding: 5px 11px; border: 1px solid var(--line-2); border-radius: var(--r-pill);
+  font-family: var(--font); font-size: var(--t-xs); color: var(--ink-700);
+}
+.fb-search:focus { border-color: var(--primary); outline: none; }
+.fb-opts {
+  display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start;
+  padding: var(--s3); max-height: 46vh; overflow-y: auto;
+}
+.fb-cnt {
+  margin-left: 5px; font-size: 10.5px; font-weight: 500;
+  font-variant-numeric: tabular-nums; color: var(--ink-400);
+}
+.capsule.active .fb-cnt, .capsule.is-zero .fb-cnt { color: inherit; opacity: 0.75; }
+/* 0 条的选项淡化但保留可点：它正是"这一维没错、是被别的默认条件挡住了"的证据 */
+.capsule.is-zero { opacity: 0.6; }
+.capsule.is-zero:hover { opacity: 1; }
 .capsule {
   padding: 3px 12px; border: 1px solid var(--line-2); border-radius: var(--r-pill);
   background: var(--surface); color: var(--ink-600);
@@ -421,7 +480,7 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 }
 .ledger-table tbody tr:last-child td { border-bottom: none; }
 
-/* 冻结列：左侧「勾选 + 序号」，右侧「操作」。
+/* 冻结列：左侧「勾选 + 序号 + 用户指定的列」，右侧「操作」。
    ⚠️ 冻结列的【实际宽度】必须与 left 偏移严格相等。
    本表是 table-layout:auto，浏览器会把声明宽度向内容最小宽度回缩
    （勾选列声明 36px、实际只画到 29px），此时只写 width 会让冻结列
@@ -450,13 +509,22 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   box-shadow: inset 1px 0 0 var(--line);
 }
 .ledger-table thead th.col-check, .ledger-table thead th.col-idx,
-.ledger-table thead th.col-actions { z-index: 8; }
-/* 冻住的两列：表头底色再深一档，与右侧滑动区分开 */
-.ledger-table thead th.col-check, .ledger-table thead th.col-idx { background: var(--thead-fc-bg); }
+.ledger-table thead th.col-actions, .ledger-table thead th.is-frozen { z-index: 8; }
+/* 冻住的列：表头底色再深一档，与右侧滑动区分开 */
+.ledger-table thead th.col-check, .ledger-table thead th.col-idx,
+.ledger-table thead th.is-frozen { background: var(--thead-fc-bg); }
 
-/* 横向滚动提示：只在确实还有内容被滚出去的那一侧投影（类名由 ledger.js 的 syncOverflow 维护） */
-.table-wrap.is-scrolled .ledger-table th.col-idx,
-.table-wrap.is-scrolled .ledger-table td.col-idx {
+/* 用户自定义的左侧冻结列（「列设置」里指定，顺序即渲染顺序）。
+   left 偏移由 js/ledger.js 的 syncFrozen() 按【实测宽度】生成
+   （`.ledger-table .fz-i { left: … }` 写进 <style id="cfz-style">），
+   这里只负责"粘住 + 表头底色 + 最后一列投影"。
+   万一生成样式缺失，left 为 auto → 退化成不粘的普通单元格，不会压列。 */
+.ledger-table th.is-frozen, .ledger-table td.is-frozen { position: sticky; z-index: 3; }
+
+/* 横向滚动提示：只在确实还有内容被滚出去的一侧投影（类名由 ledger.js 的 syncOverflow 维护）。
+   投影挂在"冻结区最后一列"上（用户没设冻结列时就是序号列），而不是写死 col-idx ——
+   否则冻结了别的列之后，投影会出现在表格中间。 */
+.table-wrap.is-scrolled .ledger-table .is-fz-last {
   box-shadow: inset -1px 0 0 var(--line), 12px 0 14px -12px oklch(21% 0.03 258 / 0.22);
 }
 .table-wrap.has-more .ledger-table th.col-actions,
@@ -475,6 +543,8 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 .td-date { color: var(--ink-600); font-variant-numeric: tabular-nums; }
 /* 归属部门是「归属」类属性，不是内容主体 —— 压一档灰度，避免和项目名称/客户名称抢视线 */
 .td-dept { color: var(--ink-600); }
+/* 没有归属部门的记录：用警示色标出来，别让「未指定」混在其它单元格里看不见 */
+.td-dept.is-none { color: var(--warn); font-style: italic; }
 .td-name { line-height: 1.45; white-space: normal; word-break: break-word; }
 /* 合计行：原本只有金额格带底纹，中间一格一格是透明的，视觉上像一条
    「断成几截的空白带」；改为整条铺满，并固定在表格底部当作实时合计条 */
@@ -519,6 +589,9 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 }
 .es-title { font-size: var(--t-base); font-weight: 600; color: var(--ink-700); }
 .es-hint { margin-top: 6px; font-size: var(--t-sm); color: var(--ink-500); line-height: 1.75; }
+/* 「当前条件下没有记录」时的快捷放行按钮：把挡路的那个筛选条件一键松开，
+   省得用户自己对着一排筛选条件猜是哪一项把数据挡住了 */
+.es-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: var(--s3); }
 .table-status {
   display: flex; align-items: baseline; gap: var(--s3);
   margin-top: var(--s2); padding: 0 2px;
@@ -688,6 +761,43 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 .map-sample { color: var(--ink-500); font-size: var(--t-xs); }
 .map-table tr.map-miss td { background: var(--warn-soft); }
 .map-select { width: 100%; padding: 4px 8px; }
+
+/* 部门归属预检（导入第 3 步）：匹配不上的部门名在这里就地指定归属 */
+.dept-check {
+  margin: var(--s3) 0 var(--s1); padding: var(--s2) var(--s3);
+  border: 1px solid var(--line); border-left: 3px solid var(--primary);
+  border-radius: var(--r2); background: var(--surface-2);
+  font-size: var(--t-sm); line-height: 1.7; color: var(--ink-700);
+}
+.dept-check.is-ok {
+  color: oklch(42% 0.09 152); background: var(--ok-soft);
+  border-color: var(--ok-line); border-left-color: var(--ok);
+}
+.dept-check.is-warn {
+  color: oklch(42% 0.10 66); background: var(--warn-soft);
+  border-color: var(--warn-line); border-left-color: var(--warn);
+}
+.dchk-title { font-weight: 600; }
+.dchk-hint { color: var(--ink-600); font-size: var(--t-xs); margin-top: 2px; }
+.dchk-hint a { color: var(--primary); cursor: pointer; font-weight: 500; }
+.dchk-row { display: flex; align-items: center; gap: var(--s2); margin-top: 6px; }
+.dchk-name {
+  /* 0 1 auto 而不是 1 1 auto：部门名普遍只有 3~6 字，让它撑满整行会把
+     「N 行」推到最右边、和名字之间隔出一大片空白。改成按内容收边，
+     多余空间交给下拉的 margin-left:auto 吸收。 */
+  flex: 0 1 auto; min-width: 0; font-weight: 500; color: var(--ink-950);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dchk-cnt { flex: 0 0 auto; font-size: var(--t-xs); color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.dchk-sel { flex: 0 0 auto; width: 200px; margin-left: auto; padding: 3px 8px; }
+.dchk-row.is-set .dchk-name { color: var(--ok); }
+.done-dept { text-align: left; max-width: 100%; margin-top: var(--s1); }
+
+/* 导入预览表：列多（19 列）且表头长，让表头不换行、随表格横向滚动，
+   否则「合同金额（自动带入决算）」这类长表头会被挤成 5 行，比数据还占地方。
+   只约束 th —— td 里有项目名称/备注这类长文本，放开让它们正常收缩。 */
+.import-step .ledger-table th { white-space: nowrap; }
+
 .import-done { align-items: center; padding: var(--s5) 0 var(--s2); }
 .done-icon {
   width: 52px; height: 52px; border-radius: 50%; font-size: 24px; font-weight: 600;
@@ -1142,11 +1252,12 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 }
 .dept-chip a { font-size: 11px; }
 
-/* ---------- 列设置面板（按账号保存） ---------- */
+/* ---------- 列设置面板（显示 / 顺序 / 左侧冻结，按账号保存） ---------- */
 .col-panel {
-  position: absolute; z-index: 60; width: 272px; background: var(--surface);
+  position: absolute; z-index: 60; width: 336px; background: var(--surface);
   border: 1px solid var(--line-2); border-radius: var(--r3);
-  box-shadow: var(--sh2); overflow: hidden;
+  box-shadow: var(--sh2); display: flex; flex-direction: column;
+  max-height: min(72vh, 700px);
 }
 .cp-head {
   display: flex; justify-content: space-between; align-items: baseline; gap: var(--s2);
@@ -1154,13 +1265,44 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   font-size: var(--t-sm); font-weight: 600; color: var(--ink-950); background: var(--surface-2);
 }
 .cp-tip { font-size: 11.5px; color: var(--ink-500); font-weight: 400; }
-.cp-list { max-height: 320px; overflow-y: auto; padding: var(--s2) var(--s3); }
-.cp-item {
-  display: flex; align-items: center; gap: 7px; padding: 3.5px 0;
-  font-size: var(--t-sm); color: var(--ink-700); cursor: pointer; white-space: nowrap;
+.cp-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s1) var(--s3) var(--s3); }
+.cp-zone + .cp-zone { margin-top: var(--s2); }
+/* 区块标题吸顶：滚动长列表时始终知道哪一段是冻结区 */
+.cp-zone-title {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--s2);
+  padding: 5px 0 4px; background: var(--surface);
+  font-size: var(--t-xs); font-weight: 600; color: var(--ink-600);
+  border-bottom: 1px solid var(--line);
 }
-.cp-item:hover { color: var(--primary); }
-.cp-item input { accent-color: var(--primary); cursor: pointer; }
+.cp-zone-title span { font-size: 11px; font-weight: 400; color: var(--ink-400); }
+.cp-list { min-height: 26px; padding-top: 2px; }
+.cp-list.cp-drop { background: var(--primary-soft); border-radius: var(--r2); }
+.cp-row {
+  display: flex; align-items: center; gap: 6px; padding: 3px 4px;
+  font-size: var(--t-sm); color: var(--ink-700); white-space: nowrap;
+  border-radius: 4px;
+}
+.cp-row:hover { background: var(--surface-2); }
+.cp-row.is-off .cp-name { color: var(--ink-400); text-decoration: line-through; }
+.cp-row.is-dragging { opacity: 0.4; }
+.cp-row.cp-drop-before { box-shadow: inset 0 2px 0 var(--primary); }
+.cp-row.cp-drop-after { box-shadow: inset 0 -2px 0 var(--primary); }
+.cp-grip { flex: 0 0 auto; color: var(--ink-300); cursor: grab; font-size: 11px; }
+.cp-row:active .cp-grip { cursor: grabbing; }
+.cp-row input[type="checkbox"] { flex: 0 0 auto; accent-color: var(--primary); cursor: pointer; }
+.cp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cp-fz {
+  flex: 0 0 auto; padding: 2px 8px; border: 1px solid var(--line-2); border-radius: var(--r-pill);
+  background: var(--surface); color: var(--ink-500);
+  font-family: var(--font); font-size: 11px; line-height: 1.5; cursor: pointer;
+}
+.cp-fz:hover { border-color: var(--primary); color: var(--primary); }
+.cp-fz.is-on {
+  background: var(--primary-soft); border-color: var(--primary-line);
+  color: var(--primary); font-weight: 500;
+}
+.cp-hint { padding: 4px 2px; font-size: var(--t-xs); color: var(--ink-400); }
 .cp-foot {
   display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s3);
   border-top: 1px solid var(--line); background: var(--surface-2); font-size: var(--t-xs);
@@ -1299,6 +1441,9 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   .form-grid { grid-template-columns: 1fr; }
   .dash-grid, .dash-grid.even { grid-template-columns: 1fr; }
   .table-wrap { max-height: none; }
+  /* 窄屏不再锁死台账页高度：让页面自然往下滚，表格卡片不承担滚动区
+     （内联的 px 高度是 JS 按桌面视口算的，必须 !important 才能盖掉） */
+  #page-ledger:not(.hidden) { height: auto !important; }
 }
 @media (max-width: 680px) {
   .menu-btn { display: inline-flex; }
@@ -1324,6 +1469,7 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   .ledger-table th.col-check, .ledger-table td.col-check,
   .ledger-table th.col-idx, .ledger-table td.col-idx,
   .ledger-table th.col-actions, .ledger-table td.col-actions,
+  .ledger-table th.is-frozen, .ledger-table td.is-frozen,
   .ledger-table tfoot td, .td-foot-label { position: static; box-shadow: none; }
   #page-ledger .table-wrap { min-height: 0; }
   /* 选项管理：窄屏改为上下堆叠，类别索引变横向滚动条 —— 212px 固定左栏
@@ -1354,7 +1500,7 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 @media print {
   @page { margin: 12mm; }
   body { background: #fff; font-size: 10.5pt; }
-  .sidebar, .sidebar-mask, .topbar, .toolbar, .capsule-row, .menu-btn,
+  .sidebar, .sidebar-mask, .topbar, .toolbar, .filterbar, .menu-btn,
   .col-check, .col-actions, .table-status, #toast-box, .dash-kpis .kpi-card::before { display: none !important; }
   .app-shell { display: block; }
   .page-container { padding: 0; }
@@ -1365,8 +1511,10 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   }
   .ledger-table thead { display: table-header-group; }
   .ledger-table thead th { position: static; box-shadow: none; background: #f2f4f7; }
-  /* 纸上没有冻结列这回事，全部退回普通流 */
+  /* 纸上没有冻结列这回事，全部退回普通流；台账页也不能是"视口高" */
+  #page-ledger:not(.hidden) { height: auto !important; }
   .ledger-table th.col-idx, .ledger-table td.col-idx,
+  .ledger-table th.is-frozen, .ledger-table td.is-frozen,
   .ledger-table tfoot td, .td-foot-label { position: static; box-shadow: none; }
   .ledger-table tbody tr, .dash-table tr { break-inside: avoid; }
   .ledger-table td, .ledger-table th { border-color: #ccc; }
@@ -1438,7 +1586,7 @@ body { margin: 0; padding: 0; background: var(--surface-2); }
     <header class="topbar">
       <div class="topbar-left"><div class="topbar-title">选项管理</div></div>
       <div class="topbar-user">
-        <span class="user-dept">财务资产部</span><span class="user-name">孙晋宁</span>
+        <span class="user-dept">财务资产部</span><span class="user-name">韩志远</span>
         <button class="btn btn-xs">修改密码</button><button class="btn btn-xs">退出</button>
       </div>
     </header>
@@ -2227,7 +2375,7 @@ function makeChain(table) {
 }
 const sb = { from: t => makeChain(t) };
 
-const Auth = { isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1', name: '孙晋宁' } };
+const Auth = { isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1', name: '韩志远' } };
 
 (async () => {
   await Dicts.load();
