@@ -47,7 +47,7 @@ const Batches = {
                 <a data-act="view">查看本批</a>
                 ${canDelete && b.current_rows > 0 ? '<a class="link-danger" data-act="del-all">删除整批</a>' : ''}
               </td>
-            </tr>`).join('') || '<tr><td colspan="5" class="empty-cell">暂无导入批次</td></tr>'}
+            </tr>`).join('') || '<tr><td colspan="5" class="empty-cell">暂无导入批次<br>在「台账总览」用「⇪ 导入 Excel」导入的数据会按批次记录在这里，便于整批回滚</td></tr>'}
           </tbody>
         </table>
       </div>`;
@@ -62,7 +62,7 @@ const Batches = {
       }
       if (a.dataset.act === 'del-all') {
         const ok = await Utils.confirm(
-          `确定删除批次「${b.file_name}」的全部 ${b.current_rows} 条数据？\n该批次的开票明细将一并删除，且不可恢复！`,
+          `确定删除批次「${b.file_name}」的全部 ${b.current_rows} 条数据？\n该批次的开票明细与回款明细将一并删除，且不可恢复！`,
           { danger: true, title: '整批删除', confirmText: '整批删除' });
         if (!ok) return;
         const { error } = await sb.from('ar_ledger').delete().eq('batch_id', id);

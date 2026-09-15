@@ -14,15 +14,26 @@ const Admin = {
 
   users: [],   // [{id, email, full_name, phone, ar_role, ar_super_admin, department_id, ar_departments, perms}]
   depts: [],   // [{id, name, sort_order}]
+  /** 权限表读取异常时的页面提示（空串 = 正常） */
+  permsWarning: '',
 
   async load() {
     const { data: profiles, error } = await sb.from('ar_users')
       .select('user_id, email, full_name, phone, department_id, ar_role, ar_super_admin, ar_protected, ar_departments(name)')
       .order('ar_super_admin', { ascending: false }).limit(500);
     if (error) { Utils.toast('用户列表加载失败：' + error.message, 'error'); return; }
-    const { data: permsRows } = await sb.from('ar_user_perms').select('user_id, perms');
+    // 报账员的「台账权限」列完全依赖这张表。读不到时必须**看得见**，
+    // 否则会表现成"所有报账员都没有权限"（常见原因：管理员判定策略未更新）
+    const { data: permsRows, error: permErr } = await sb.from('ar_user_perms').select('user_id, perms');
     const permMap = new Map((permsRows || []).map(p => [p.user_id, p.perms || {}]));
     this.users = (profiles || []).map(p => ({ ...p, id: p.user_id, perms: permMap.get(p.user_id) || {} }));
+    this.permsWarning = '';
+    if (permErr) {
+      this.permsWarning = '权限数据读取失败：' + permErr.message +
+        '　→ 下面的权限勾选不可信，请先执行 sql/upgrade-v3.2-admin-rls.sql 再刷新。';
+    } else if (!(permsRows || []).length && this.users.some(u => u.ar_role === 'user')) {
+      this.permsWarning = '系统里有报账员，但一条权限记录都没读到。若确认分配过权限，请执行 sql/upgrade-v3.2-admin-rls.sql（管理员判定策略修复）后刷新。';
+    }
     await this.loadDepts();
     this.render();
   },
@@ -86,12 +97,22 @@ const Admin = {
       </tr>`;
     }).join('');
 
-    // 部门管理（chips）
-    const deptChips = this.depts.map(d => `
-      <span class="dept-chip">${Utils.escapeHtml(d.name)}
-        <a data-act="dept-edit" data-id="${d.id}" title="重命名">改</a>
-        <a class="link-danger" data-act="dept-del" data-id="${d.id}" title="删除">删</a>
-      </span>`).join('') || '<span class="muted">暂无部门，点击「＋ 新增部门」创建</span>';
+    // 部门管理（卡片网格）：笔数 = 该部门的台账记录数，便于判断哪些部门在用
+    const countOf = {};
+    (Ledger.rows || []).forEach(r => { countOf[r.department_id] = (countOf[r.department_id] || 0) + 1; });
+    const deptCards = this.depts.map((d, i) => `
+      <div class="dept-card" data-id="${d.id}">
+        <div class="dc-head">
+          <span class="dc-name" title="${Utils.escapeHtml(d.name)}">${Utils.escapeHtml(d.name)}</span>
+          <span class="dc-count ${countOf[d.id] ? '' : 'zero'}" title="该部门的台账记录数">${countOf[d.id] || 0}</span>
+        </div>
+        <div class="dc-acts">
+          <button class="dc-btn" data-act="dept-up" data-id="${d.id}" ${i === 0 ? 'disabled' : ''} title="上移">↑</button>
+          <button class="dc-btn" data-act="dept-down" data-id="${d.id}" ${i === this.depts.length - 1 ? 'disabled' : ''} title="下移">↓</button>
+          <button class="dc-btn" data-act="dept-edit" data-id="${d.id}" title="重命名">重命名</button>
+          <button class="dc-btn danger" data-act="dept-del" data-id="${d.id}" title="删除" ${countOf[d.id] ? 'disabled' : ''}>删除</button>
+        </div>
+      </div>`).join('') || '<div class="dept-empty">暂无部门，在右上角输入名称后点「＋ 新增部门」创建</div>';
 
     page.innerHTML = `
       <div class="page-head">
@@ -104,6 +125,7 @@ const Admin = {
         <div class="toolbar-left"><span class="muted">共 ${this.users.length} 个账号 · 「删除」仅将账号移出台账，绝不影响月报系统</span></div>
         <div class="toolbar-right">${Auth.isAdmin ? '<button class="btn btn-primary" data-act="create">＋ 新增账号</button>' : ''}</div>
       </div>
+      ${this.permsWarning ? `<div class="admin-warn">⚠ ${Utils.escapeHtml(this.permsWarning)}</div>` : ''}
       <div class="table-wrap">
         <table class="admin-table">
           <thead><tr>
@@ -112,16 +134,19 @@ const Admin = {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <div class="guide-card" style="margin-top:16px">
-        <div class="page-head" style="margin-bottom:8px">
-          <h2 style="font-size:14px">部门管理</h2>
-          <span class="muted">台账独立部门，新增/修改/删除均不影响月报系统；被用户或台账数据引用的部门无法删除</span>
+      <div class="dept-panel">
+        <div class="dept-panel-head">
+          <div>
+            <div class="dph-title">部门管理</div>
+            <div class="dph-sub">台账独立部门，与月报系统互不影响 · 卡片右上角数字为该部门的台账记录数<br>
+              已被用户或台账数据使用的部门不能删除；顺序即台账筛选与下拉里的展示顺序</div>
+          </div>
+          <div class="dept-add">
+            <input class="ipt" id="dept-new-name" placeholder="新部门名称，如：财务资产部">
+            <button class="btn btn-primary" data-act="dept-add">＋ 新增部门</button>
+          </div>
         </div>
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-          <input class="ipt" id="dept-new-name" placeholder="新部门名称" style="width:220px">
-          <button class="btn btn-primary btn-xs" data-act="dept-add" style="align-self:center">＋ 新增部门</button>
-        </div>
-        <div class="perm-cell" id="dept-list">${deptChips}</div>
+        <div class="dept-grid" id="dept-list">${deptCards}</div>
       </div>`;
 
     if (Auth.isAdmin) {
@@ -131,7 +156,11 @@ const Admin = {
         if (u) this.userDialog(u);
       }));
       page.querySelectorAll('[data-act="save-perms"]').forEach(a => a.addEventListener('click', () => this.savePerms(a.dataset.id)));
-      page.querySelector('[data-act="dept-add"]').addEventListener('click', () => this.deptDialog(null));
+      page.querySelector('[data-act="dept-add"]').addEventListener('click', () => this.deptAdd());
+      page.querySelectorAll('[data-act="dept-up"]').forEach(b =>
+        b.addEventListener('click', () => this.moveDept(b.dataset.id, 'up')));
+      page.querySelectorAll('[data-act="dept-down"]').forEach(b =>
+        b.addEventListener('click', () => this.moveDept(b.dataset.id, 'down')));
       page.querySelectorAll('[data-act="dept-edit"]').forEach(a => a.addEventListener('click', () => {
         const d = this.depts.find(x => x.id === a.dataset.id);
         if (d) this.deptDialog(d);
@@ -278,6 +307,39 @@ const Admin = {
 
   /* ---------- 部门管理 ---------- */
 
+  /** 新增部门：输入框有值直接创建，留空则开弹窗（走带校验的完整流程） */
+  async deptAdd() {
+    const inp = document.getElementById('dept-new-name');
+    const name = (inp && inp.value || '').trim();
+    if (!name) { this.deptDialog(null); return; }
+    const { error } = await sb.from('ar_departments').insert({ name, sort_order: this.depts.length + 1 });
+    if (error) {
+      Utils.toast('创建失败：' + (/duplicate|unique/i.test(error.message) ? '该部门名称已存在' : error.message), 'error');
+      return;
+    }
+    Utils.toast(`已创建部门「${name}」`, 'success');
+    await this.load();
+  },
+
+  /** 部门排序：与相邻项交换，并把 sort_order 规范化为 1..n（下拉与筛选顺序即此顺序） */
+  async moveDept(deptId, dir) {
+    const i = this.depts.findIndex(d => d.id === deptId);
+    if (i < 0) return;
+    const j = dir === 'up' ? i - 1 : i + 1;
+    if (j < 0 || j >= this.depts.length) return;
+    const arr = [...this.depts];
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    // 只更新顺序真正变化的行，避免无谓写入
+    const changed = arr
+      .map((d, idx) => ({ id: d.id, sort_order: idx + 1, old: Number(d.sort_order || 0) }))
+      .filter(r => r.old !== r.sort_order);
+    for (const r of changed) {
+      const { error } = await sb.from('ar_departments').update({ sort_order: r.sort_order }).eq('id', r.id);
+      if (error) { Utils.toast('排序保存失败：' + error.message, 'error'); await this.load(); return; }
+    }
+    await this.load();
+  },
+
   deptDialog(dept) {
     const isNew = !dept;
     const old = document.getElementById('modal-dept');
@@ -343,27 +405,91 @@ const Admin = {
   },
 
   /* ---------- 系统设置（管理员） ---------- */
+  /*
+   * 本页只放「运行信息 + 数据维护工具」，不放业务词典：
+   *   客户属性 / 部门 / 单位 / 工作性质 … 等下拉选项统一在「选项管理」页维护（ar_dict）。
+   *
+   * 历史变更（2026-09-15）：删除「超期预警天数」设置。它来自 v1 的自动逾期设想，
+   * 但按 CONTEXT.md / ADR-0002 的结论，本院业务"按合同期限几乎全部逾期"、自动判定
+   * 无区分度，债权状态改为人工维护，该天数已无人使用（Utils.overdueStatus 亦无调用方）。
+   */
 
   async loadSettings() {
     const page = document.getElementById('page-settings');
     if (!page) return;
+
+    // 前端构建版本：直接读 index.html 里 config.js 的 ?v=（免去两处手工同步）
+    const build = (document.querySelector('script[src*="config.js"]') || { src: '' }).src.match(/[?&]v=([\w.]+)/);
+    const dbHost = String(SUPABASE_URL || '').replace(/^https?:\/\//, '').replace(/\/+$/, '') || '未配置';
+    const u = Auth.arUser || {};
+    const roleName = Auth.isSuperAdmin ? '超级管理员' : (Auth.isAdmin ? '管理员' : '报账员');
+
+    // 明细表探测：表未建时给出明确指引，而不是让回款区块静默报错
+    let detailState = '<span class="tag tag-green">已就绪</span>';
+    const { error: probeErr } = await sb.from('ar_receipts').select('id').limit(1);
+    if (probeErr) {
+      detailState = '<span class="tag tag-orange">未创建</span> <span class="muted">需执行 sql/upgrade-v3.1-receipts.sql</span>';
+    }
+
     page.innerHTML = `
-      <div class="page-head"><h2>系统设置</h2></div>
-      <div class="settings-card">
-        <label class="form-field">
-          <span class="ff-label">超期预警天数（完工日期后多少天未收清视为超期）</span>
-          <input type="number" class="ipt" id="set-warn-days" min="1" max="3650" value="${Ledger.settings.warn_days}" style="width:140px">
-        </label>
-        <button class="btn btn-primary" id="set-save">保存设置</button>
+      <div class="page-head">
+        <h2>系统设置</h2>
+        <span class="muted">本页为运行信息与数据维护；业务下拉选项（客户属性 / 部门 / 单位 / 工作性质等）在「选项管理」页维护</span>
+      </div>
+      <div class="settings-grid">
+        <div class="settings-card">
+          <div class="set-title">系统信息</div>
+          <div class="set-list">
+            <div class="set-row"><span class="set-k">前端构建版本</span><span class="set-v">${build ? 'v' + Utils.escapeHtml(build[1]) : '未识别'}</span></div>
+            <div class="set-row"><span class="set-k">数据库实例</span><span class="set-v">${Utils.escapeHtml(dbHost)}</span></div>
+            <div class="set-row"><span class="set-k">台账记录</span><span class="set-v">${(Ledger.rows || []).length} 条</span></div>
+            <div class="set-row"><span class="set-k">开票/回款明细</span><span class="set-v">${detailState}</span></div>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="set-title">当前账号</div>
+          <div class="set-list">
+            <div class="set-row"><span class="set-k">登录邮箱</span><span class="set-v">${Utils.escapeHtml((Auth.currentUser && Auth.currentUser.email) || '—')}</span></div>
+            <div class="set-row"><span class="set-k">姓名</span><span class="set-v">${Utils.escapeHtml(u.full_name || '（未填写）')}</span></div>
+            <div class="set-row"><span class="set-k">角色</span><span class="set-v">${roleName}</span></div>
+            <div class="set-row"><span class="set-k">归属部门</span><span class="set-v">${Utils.escapeHtml((u.ar_departments && u.ar_departments.name) || '未分配')}</span></div>
+            <div class="set-row"><span class="set-k">台账权限</span><span class="set-v">${Auth.permCount()} / ${PERM_DEFS.length} 项${Auth.isAdmin ? '（管理员默认全部）' : ''}</span></div>
+          </div>
+          <div class="set-hint">账号信息与权限由管理员在「用户管理」页调整；密码在右上角「个人设置」里修改。</div>
+        </div>
+
+        <div class="settings-card">
+          <div class="set-title">数据维护</div>
+          <p class="set-hint">
+            「最新挂账时间」已改为按开票明细自动维护（= 该合同最近一笔开票日期）。
+            历史手工填写或导入的值与明细不一致时，可在此一键校正；没有开票明细的记录保持不变。
+          </p>
+          <button class="btn btn-primary" id="set-recalc">重算全部台账的挂账时间</button>
+          <div class="pwd-hint" id="set-recalc-msg"></div>
+        </div>
       </div>`;
-    page.querySelector('#set-save').addEventListener('click', async () => {
-      const days = Number(page.querySelector('#set-warn-days').value);
-      if (!(days >= 1 && days <= 3650)) { Utils.toast('预警天数须在 1 - 3650 之间', 'error'); return; }
-      const { error } = await sb.from('ar_settings').update({ warn_days: days, updated_at: new Date().toISOString() }).eq('id', 1);
-      if (error) { Utils.toast('保存失败：' + error.message, 'error'); return; }
-      Ledger.settings.warn_days = days;
-      Utils.toast('设置已保存', 'success');
-      if (App.currentView === 'ledger') Ledger.render();
+
+    page.querySelector('#set-recalc').addEventListener('click', async () => {
+      const msg = page.querySelector('#set-recalc-msg');
+      const ok = await Utils.confirm(
+        '将把每条台账的「最新挂账时间」重算为该合同最近一笔开票日期。\n' +
+        '没有开票明细的记录保持不变。该操作可重复执行。',
+        { title: '重算挂账时间', confirmText: '开始重算' });
+      if (!ok) return;
+      msg.textContent = '正在重算…';
+      const { data, error } = await sb.rpc('ar_recalc_charge_date');
+      if (error) {
+        msg.textContent = /does not exist|schema cache|Could not find/i.test(error.message)
+          ? '数据库还没有这个维护函数，请先执行 sql/upgrade-v3.2-admin-rls.sql'
+          : '重算失败：' + error.message;
+        return;
+      }
+      const n = data && data.updated != null ? data.updated : 0;
+      msg.textContent = `已更新 ${n} 条记录`;
+      Utils.toast(`挂账时间重算完成：更新 ${n} 条`, 'success');
+      // 目标页是隐藏的台账页，刷新失败不影响本页结果
+      try { await Ledger.reload(); } catch (e) { /* 忽略 */ }
     });
   },
 };

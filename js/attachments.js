@@ -75,7 +75,7 @@ const Attachments = {
           <a data-att="dl">下载</a>
           ${canEdit ? '<a class="link-danger" data-att="del">删除</a>' : ''}
         </td>
-      </tr>`).join('') || '<tr><td colspan="5" class="empty-cell">暂无附件</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="5" class="empty-cell">暂无附件<br>决算文件、中止证明等可上传留存，方便日后对账与举证</td></tr>';
 
     return `
       ${canEdit ? `

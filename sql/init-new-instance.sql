@@ -1315,6 +1315,134 @@ CREATE POLICY "ar_invoices_delete" ON public.ar_invoices
 
 
 -- ==========================================================================
+-- v3.2 台账管理员判定修复（P0）——与 sql/upgrade-v3.2-admin-rls.sql 内容一致
+-- --------------------------------------------------------------------------
+-- 早期那批 RLS 策略用了月报系统的 public.is_admin()（读 profiles.role），
+-- 而台账管理员身份存在 ar_users.ar_role（= public.ar_is_admin()）。本库
+-- profiles 由触发器生成、role 恒为 reporter，于是 is_admin() 恒 FALSE，导致：
+--   · 用户管理页读不到 ar_user_perms（报账员权限全部显示未勾选）、保存被拒
+--   · 系统设置保存被拒
+--   · 「部门归属」校验走 profiles.department_id（空）→ 带部门的新记录被拒
+-- 统一改用 ar_is_admin() 后恢复正常。
+-- ==========================================================================
+
+DROP POLICY IF EXISTS "ar_perms_select" ON public.ar_user_perms;
+CREATE POLICY "ar_perms_select" ON public.ar_user_perms
+  FOR SELECT TO authenticated USING (
+    user_id = auth.uid() OR public.ar_is_admin()
+  );
+
+DROP POLICY IF EXISTS "ar_perms_insert_admin" ON public.ar_user_perms;
+CREATE POLICY "ar_perms_insert_admin" ON public.ar_user_perms
+  FOR INSERT TO authenticated WITH CHECK (public.ar_is_admin());
+
+DROP POLICY IF EXISTS "ar_perms_update_admin" ON public.ar_user_perms;
+CREATE POLICY "ar_perms_update_admin" ON public.ar_user_perms
+  FOR UPDATE TO authenticated
+  USING (public.ar_is_admin()) WITH CHECK (public.ar_is_admin());
+
+DROP POLICY IF EXISTS "ar_perms_delete_admin" ON public.ar_user_perms;
+CREATE POLICY "ar_perms_delete_admin" ON public.ar_user_perms
+  FOR DELETE TO authenticated USING (public.ar_is_admin());
+
+DROP POLICY IF EXISTS "ar_settings_select" ON public.ar_settings;
+CREATE POLICY "ar_settings_select" ON public.ar_settings
+  FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "ar_settings_update_admin" ON public.ar_settings;
+CREATE POLICY "ar_settings_update_admin" ON public.ar_settings
+  FOR UPDATE TO authenticated
+  USING (public.ar_is_admin()) WITH CHECK (public.ar_is_admin());
+
+DROP POLICY IF EXISTS "ar_ledger_insert" ON public.ar_ledger;
+CREATE POLICY "ar_ledger_insert" ON public.ar_ledger
+  FOR INSERT TO authenticated WITH CHECK (
+    public.ar_is_admin() OR (
+      public.ar_can('add') AND (
+        department_id IS NULL OR department_id IN (
+          SELECT department_id FROM public.ar_users WHERE user_id = auth.uid()
+        )
+      )
+    )
+  );
+
+DROP POLICY IF EXISTS "ar_ledger_update" ON public.ar_ledger;
+CREATE POLICY "ar_ledger_update" ON public.ar_ledger
+  FOR UPDATE TO authenticated USING (
+    public.ar_is_admin() OR (
+      public.ar_can('edit') AND public.ar_can_see_row(department_id)
+    )
+  );
+
+DROP POLICY IF EXISTS "ar_ledger_delete" ON public.ar_ledger;
+CREATE POLICY "ar_ledger_delete" ON public.ar_ledger
+  FOR DELETE TO authenticated USING (
+    public.ar_is_admin() OR (
+      public.ar_can('delete') AND public.ar_can_see_row(department_id)
+    )
+  );
+
+DROP POLICY IF EXISTS "ar_batches_insert" ON public.ar_import_batches;
+CREATE POLICY "ar_batches_insert" ON public.ar_import_batches
+  FOR INSERT TO authenticated WITH CHECK (
+    public.ar_is_admin() OR public.ar_can('import')
+  );
+
+DROP POLICY IF EXISTS "ar_batches_update" ON public.ar_import_batches;
+CREATE POLICY "ar_batches_update" ON public.ar_import_batches
+  FOR UPDATE TO authenticated USING (
+    public.ar_is_admin() OR public.ar_can('import')
+  );
+
+DROP POLICY IF EXISTS "ar_batches_delete" ON public.ar_import_batches;
+CREATE POLICY "ar_batches_delete" ON public.ar_import_batches
+  FOR DELETE TO authenticated USING (
+    public.ar_is_admin() OR public.ar_can('delete')
+  );
+
+DROP POLICY IF EXISTS "ar_profiles_select" ON public.profiles;
+CREATE POLICY "ar_profiles_select" ON public.profiles
+  FOR SELECT TO authenticated USING (
+    id = auth.uid() OR public.is_admin() OR public.ar_is_admin()
+  );
+
+-- 维护工具：重算「最新挂账时间」= 该合同最近一笔开票日期（仅台账管理员）
+CREATE OR REPLACE FUNCTION public.ar_recalc_charge_date()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_updated INTEGER := 0;
+BEGIN
+  IF NOT public.ar_is_admin() THEN
+    RAISE EXCEPTION '只有台账管理员才能执行维护操作';
+  END IF;
+
+  WITH latest AS (
+    SELECT ledger_id, MAX(invoice_date) AS d
+    FROM public.ar_invoices
+    WHERE invoice_date IS NOT NULL
+    GROUP BY ledger_id
+  ), upd AS (
+    UPDATE public.ar_ledger l
+       SET charge_date = latest.d
+      FROM latest
+     WHERE l.id = latest.ledger_id
+       AND l.charge_date IS DISTINCT FROM latest.d
+    RETURNING 1
+  )
+  SELECT count(*) INTO v_updated FROM upd;
+
+  RETURN jsonb_build_object('updated', v_updated);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.ar_recalc_charge_date() TO authenticated;
+
+
+-- ==========================================================================
 -- 首个超级管理员设置（建好 Authentication 用户后执行，换掉邮箱）
 -- ==========================================================================
 -- ① Studio → Authentication → Users → Add user：

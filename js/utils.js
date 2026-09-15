@@ -168,7 +168,8 @@ const Utils = {
 
   /** 给密码输入框绑定实时强度进度条（bar 进度条元素，hint 提示元素） */
   bindPwdMeter(input, bar, hint) {
-    const colors = ['#e5e7eb', '#dc2626', '#f97316', '#eab308', '#84cc16', '#16a34a'];
+    /* 色阶与设计令牌同源（oklch → sRGB）：灰 → 朱砂 → 琥珀 → 橄榄 → 绿 */
+    const colors = ['#e0e3e8', '#a74639', '#975800', '#756c00', '#53760e', '#137d41'];
     const update = () => {
       const v = input.value;
       const s = this.pwdScore(v);
@@ -208,25 +209,9 @@ const Utils = {
   },
 
   /**
-   * 超期预警状态计算
-   * 规则：应收余额 = 应收合计 - 已到账金额
-   *   应收余额 <= 0        -> settled  已结清（绿）
-   *   无完工日期           -> none     —
-   *   今天 > 完工 + warnDays -> overdue 超期N天（红）
-   *   今天 > 完工日期       -> soon     临近超期（橙）
-   *   其他                 -> ok       未超期（灰绿）
+   * 说明（2026-09-15）：原 `overdueStatus()`（按完工日期 + 预警天数自动判定超期）
+   * 已删除。它引用的 receivable_total / end_date 是 v3 已废弃字段，且按
+   * CONTEXT.md / ADR-0002 的结论——本院"按合同期限几乎全部逾期"、自动判定无区分度，
+   * 债权状态改为人工维护（「债权状态」下拉）。系统不做自动逾期判定。
    */
-  overdueStatus(row, warnDays = 90) {
-    const total = Number(row.receivable_total || 0);
-    const received = Number(row.received_amount || 0);
-    const balance = total - received;
-    if (total <= 0 && balance <= 0) return { level: 'settled', label: '已结清', days: 0, balance: 0 };
-    if (balance <= 0) return { level: 'settled', label: '已结清', days: 0, balance: 0 };
-    if (!row.end_date) return { level: 'none', label: '—', days: null, balance };
-    const days = Utils.daysBetween(row.end_date, Utils.today());
-    if (days === null) return { level: 'none', label: '—', days: null, balance };
-    if (days > warnDays) return { level: 'overdue', label: `超期${days - warnDays}天`, days, balance };
-    if (days > 0) return { level: 'soon', label: '临近超期', days, balance };
-    return { level: 'ok', label: '未超期', days, balance };
-  },
 };

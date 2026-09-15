@@ -21,6 +21,7 @@
 - **台账口径**（CONTEXT.md，详见 docs/adr/）：一行 = 一个合同；决算方式非「工作量」时合同金额自动带入决算金额（导入与录入均生效）；决算金额为空时账外应收/应收余额显示"—"且不参与看板与导出合计；核销可逆，总览默认筛「未结」（应收余额 ≠ 0）
 - **数据看板**：账内 / 账外应收、应收余额 KPI（决算未定笔数附注），**月度开票/回款趋势（近 12 个月，明细聚合）**，各部门余额 TOP8，**各单位（债权主体法人口径）余额**，**客户应收余额 TOP10 与客户属性欠款构成（大类着色）**，债权状态构成，催收跟踪 TOP10
 - **权限模型**：超级管理员 / 管理员 / 报账员三级 + 7 项逐人权限；列显示设置按账号独立保存
+- **系统设置**：前端构建版本 / 数据库实例 / 明细表就绪状态 / 当前账号与权限一览 + 数据维护工具（按开票明细重算「最新挂账时间」）。业务下拉选项统一在「选项管理」页维护
 
 ## 目录结构
 
@@ -52,6 +53,7 @@
 │   ├── ar-user-management.sql           # 旧版用户管理（已被 ar-users-v2 取代，历史存档）
 │   ├── upgrade-v3-indicators.sql        # v3 升级：新列 + 选项字典 + 附件 + 字段保护
 │   └── upgrade-v3.1-receipts.sql        # v3.1 升级：ar_receipts 回款明细表（已运行 v3 的库执行）
+│   └── upgrade-v3.2-admin-rls.sql       # v3.2 修复：管理员判定策略（is_admin → ar_is_admin）+ 挂账时间重算函数
 └── vendor/                 # supabase-js / SheetJS（gitignore，正式部署拷贝到服务器；
                             # 缺失时自动回退 jsDelivr CDN）
 ```
@@ -59,6 +61,20 @@
 ### 已运行 v3 的库升级到 v3.1（回款明细）
 
 Supabase Studio SQL Editor 粘贴运行 `sql/upgrade-v3.1-receipts.sql`（幂等），前端版本号需 ≥ `?v=20260915a`。
+
+### 已运行 v3 的库升级到 v3.2（管理员判定修复，必做）
+
+Supabase Studio SQL Editor 粘贴运行 `sql/upgrade-v3.2-admin-rls.sql`（幂等），前端版本号需 ≥ `?v=20260915h`。
+
+**为什么必须执行**：早期那批 RLS 策略用了月报系统的 `public.is_admin()`（读 `profiles.role`），而台账管理员身份自 ar-users-v2 起存在 `ar_users`（=`public.ar_is_admin()`）。本库的 `profiles` 由注册触发器生成、`role` 恒为 `reporter`，即 `is_admin()` 恒为 **FALSE**，症状：
+
+| 症状 | 原因 |
+|---|---|
+| 用户管理页里报账员的「台账权限」全部显示未勾选、保存权限报错 | `ar_user_perms` 读写策略走 `is_admin()` |
+| 系统设置保存被拒 | `ar_settings` 更新策略走 `is_admin()` |
+| 新增台账记录（带部门）被拒 | 部门校验子查询走 `profiles.department_id`（为空） |
+
+修复后策略统一改用 `ar_is_admin()`，并附带一个维护函数 `ar_recalc_charge_date()`（系统设置页的「重算挂账时间」按钮）。
 
 ## 部署 / 升级
 
@@ -73,7 +89,7 @@ Supabase Studio SQL Editor 粘贴运行 `sql/upgrade-v3.1-receipts.sql`（幂等
 
 ### 全新环境
 
-依次执行 `sql/schema.sql` → `sql/ar-users-v2.sql` → `sql/ar-user-management.sql` → `sql/upgrade-v3-indicators.sql`，首个超级管理员在 SQL 里设置 `ar_users.ar_super_admin = TRUE`。
+依次执行 `sql/init-new-instance.sql`（一键初始化：schema-standalone + ar-users-v2 + upgrade-v3-indicators + upgrade-v3.1-receipts + v3.2 管理员判定修复，按依赖顺序拼接、幂等），首个超级管理员用文件末尾注释里的 SQL 设置（`ar_users.ar_role='admin', ar_super_admin=TRUE`）。
 
 ### 前端配置
 

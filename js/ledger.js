@@ -139,7 +139,7 @@ const Ledger = {
     const statuses = ['全部', ...Dicts.get('project_status')];
     const debts = ['全部', ...Dicts.get('debt_status')];
     const cap = (group, val, cur) =>
-      `<button class="capsule ${val === cur ? 'active' : ''}" data-group="${group}" data-val="${Utils.escapeHtml(val)}">${Utils.escapeHtml(val)}</button>`;
+      `<button class="capsule ${val === cur ? 'active' : ''}" data-group="${group}" data-val="${Utils.escapeHtml(val)}" aria-pressed="${val === cur}" aria-label="${group === 'dept' ? '部门' : group === 'settled' ? '结清状态' : group === 'project_status' ? '项目状态' : group === 'debt_status' ? '债权状态' : '客户属性'}：${Utils.escapeHtml(val)}">${Utils.escapeHtml(val)}</button>`;
     return `
       <div class="capsule-row"><span class="capsule-label">部门</span>${depts.length ? [cap('dept', '全部', this.filters.dept), ...depts.map(d => cap('dept', d, this.filters.dept))].join('') : '<span class="muted">暂无数据</span>'}</div>
       <div class="capsule-row"><span class="capsule-label">结清状态</span>${['未结', '已结清', '全部'].map(s => cap('settled', s, this.filters.settled)).join('')}</div>
@@ -210,7 +210,7 @@ const Ledger = {
       return s + Number(v || 0);
     }, 0);
     const footCells = [
-      '<td colspan="2" class="ta-r">合计</td>',
+      '<td colspan="2" class="ta-r td-foot td-foot-label">合计</td>',
       ...defs.map(f => f.type === 'money'
         ? `<td class="ta-r td-money td-foot">${Utils.fmtMoney(sum(f.key))}</td>`
         : '<td></td>'),
@@ -218,15 +218,25 @@ const Ledger = {
     ].join('');
 
     const totalCols = 2 + defs.length + 1;
+    const emptyMsg = this.hasActiveFilter()
+      ? '当前筛选条件下没有记录<br>把「结清状态」切到「全部」，或清空搜索关键词即可看到更多'
+      : '台账还没有记录<br>点「＋ 新增记录」逐条录入，或用「⇪ 导入 Excel」批量导入';
     return `
       <div class="table-wrap">
         <table class="ledger-table">
           <thead><tr>${headCells}</tr></thead>
-          <tbody>${bodyRows || `<tr><td colspan="${totalCols}" class="empty-cell">暂无数据，点击「新增记录」或「导入 Excel」开始建立台账</td></tr>`}</tbody>
+          <tbody>${bodyRows || `<tr><td colspan="${totalCols}" class="empty-cell">${emptyMsg}</td></tr>`}</tbody>
           ${rows.length ? `<tfoot><tr>${footCells}</tr></tfoot>` : ''}
         </table>
       </div>
       <div class="table-status">共 ${rows.length} 条记录 · 已选 ${this.selected.size} 条${this.filters.batch ? ' · 批次视图' : ''}</div>`;
+  },
+
+  /** 是否有生效的筛选条件（用于区分「筛选无结果」与「真的没有数据」） */
+  hasActiveFilter() {
+    const f = this.filters;
+    return !!(f.search.trim() || f.dept !== '全部' || f.project_status !== '全部'
+      || f.debt_status !== '全部' || f.client_attr !== '全部' || f.settled !== '全部' || f.batch);
   },
 
   render() {
@@ -260,7 +270,11 @@ const Ledger = {
     root.querySelectorAll('.capsule').forEach(c => c.addEventListener('click', () => {
       const g = c.dataset.group, v = c.dataset.val;
       this.filters[g] = v;
-      root.querySelectorAll(`.capsule[data-group="${g}"]`).forEach(x => x.classList.toggle('active', x === c));
+      root.querySelectorAll(`.capsule[data-group="${g}"]`).forEach(x => {
+        const on = x === c;
+        x.classList.toggle('active', on);
+        x.setAttribute('aria-pressed', String(on));
+      });
       this.refreshTable();
     }));
 

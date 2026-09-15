@@ -6,8 +6,30 @@
  *      决算金额未定的行：账外应收 / 应收余额不计入合计（KPI 附提示笔数）
  * 视角：部门（责任口径 TOP8）与 单位（债权主体法人口径）正交聚合（CONTEXT.md「组织」）
  * 趋势：月度开票/回款（数据源 ar_invoices / ar_receipts 明细表，表未建时该卡静默隐藏）
- * 图表：纯 SVG 手绘，无外部依赖
+ * 图表：纯 SVG 手绘，无外部依赖；配色与 css/style.css 设计令牌同源（oklch 换算的 sRGB 值）
  */
+
+/* —— 图表色板（对应 css/style.css :root 令牌的 sRGB 等价色）—— */
+const C_PRIMARY   = '#21539c';   // --primary
+const C_INK_950   = '#101926';   // --ink-950
+const C_INK_600   = '#5f6771';   // --ink-600
+const C_INK_500   = '#7a818b';   // --ink-500
+const C_INK_400   = '#a0a5ad';   // --ink-400
+const C_LINE      = '#e0e3e8';   // --line
+const C_SURFACE_3 = '#ecf0f5';   // --surface-3
+const C_DANGER    = '#b51f1c';   // --danger
+const C_OK        = '#267543';   // --ok
+const C_TEAL      = '#006a6a';   // --teal
+const C_VIOLET    = '#623e96';   // --violet
+
+/** 客户属性大类着色（分类用色，刻意避开红/琥珀以免与风险语义混淆） */
+function groupColorOf(name) {
+  if (/^内部单位/.test(name)) return C_INK_600;
+  if (/^政府部门/.test(name)) return C_PRIMARY;
+  if (/^煤矿集团/.test(name)) return C_TEAL;
+  if (/^社会客户/.test(name)) return C_VIOLET;
+  return C_INK_400;
+}
 
 const Dashboard = {
 
@@ -77,11 +99,8 @@ const Dashboard = {
 
     /* 客户属性欠款构成（按大类着色：内部单位/政府部门/煤矿集团/社会客户） */
     const ATTR_GROUPS = [
-      ['内部单位', /^内部单位/, '#64748b'],
-      ['政府部门', /^政府部门/, '#2563eb'],
-      ['煤矿集团', /^煤矿集团/, '#ea580c'],
-      ['社会客户', /^社会客户/, '#0d9488'],
-      ['其他', /.*/, '#94a3b8'],
+      ['内部单位', /^内部单位/], ['政府部门', /^政府部门/],
+      ['煤矿集团', /^煤矿集团/], ['社会客户', /^社会客户/], ['其他', /.*/],
     ];
     const groupOf = name => ATTR_GROUPS.find(([, re]) => re.test(name))[0];
     const byAttr = {};
@@ -277,19 +296,19 @@ const Dashboard = {
       const x1 = cx - barW - 1, x2 = cx + 1;
       const label = Number(m.slice(5)) + '月';
       const lab = i === 0 || Number(m.slice(5)) === 1 ? String(m.slice(2, 4)) + '年' : label;
-      const t1 = iv > 0 ? `<text x="${x1 + barW / 2}" y="${y(iv) - 4}" text-anchor="middle" font-size="9" fill="#2563eb">${this.wanShort(iv)}</text>` : '';
-      const t2 = rv > 0 ? `<text x="${x2 + barW / 2}" y="${y(rv) - 4}" text-anchor="middle" font-size="9" fill="#16a34a">${this.wanShort(rv)}</text>` : '';
+      const t1 = iv > 0 ? `<text x="${x1 + barW / 2}" y="${y(iv) - 4}" text-anchor="middle" font-size="9" fill="${C_PRIMARY}">${this.wanShort(iv)}</text>` : '';
+      const t2 = rv > 0 ? `<text x="${x2 + barW / 2}" y="${y(rv) - 4}" text-anchor="middle" font-size="9" fill="${C_OK}">${this.wanShort(rv)}</text>` : '';
       return `
-        ${t1}<rect x="${x1}" y="${y(iv)}" width="${barW}" height="${Math.max(top + plotH - y(iv), iv > 0 ? 2 : 0)}" rx="2" fill="#2563eb" opacity="0.88"/>
-        ${t2}<rect x="${x2}" y="${y(rv)}" width="${barW}" height="${Math.max(top + plotH - y(rv), rv > 0 ? 2 : 0)}" rx="2" fill="#16a34a" opacity="0.88"/>
-        <text x="${cx}" y="${H - 18}" text-anchor="middle" font-size="10" fill="#64748b">${lab}</text>`;
+        ${t1}<rect x="${x1}" y="${y(iv)}" width="${barW}" height="${Math.max(top + plotH - y(iv), iv > 0 ? 2 : 0)}" rx="2" fill="${C_PRIMARY}"/>
+        ${t2}<rect x="${x2}" y="${y(rv)}" width="${barW}" height="${Math.max(top + plotH - y(rv), rv > 0 ? 2 : 0)}" rx="2" fill="${C_OK}"/>
+        <text x="${cx}" y="${H - 18}" text-anchor="middle" font-size="10" fill="${C_INK_500}">${lab}</text>`;
     }).join('');
-    const axis = `<line x1="0" y1="${top + plotH}" x2="${W}" y2="${top + plotH}" stroke="#e2e8f0"/>`;
+    const axis = `<line x1="0" y1="${top + plotH}" x2="${W}" y2="${top + plotH}" stroke="${C_LINE}"/>`;
     return `
       <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${axis}${bars}</svg>
       <div class="dash-legend">
-        <div class="dash-legend-item"><i style="background:#2563eb"></i>开票</div>
-        <div class="dash-legend-item"><i style="background:#16a34a"></i>回款</div>
+        <div class="dash-legend-item"><i style="background:${C_PRIMARY}"></i>开票</div>
+        <div class="dash-legend-item"><i style="background:${C_OK}"></i>回款</div>
       </div>`;
   },
 
@@ -304,44 +323,38 @@ const Dashboard = {
 
   /* ---------- 部门条形图 ---------- */
   deptChart(bars) {
-    return this.barChart(bars, { color: '#2563eb', labelW: 92 });
+    return this.barChart(bars, { color: C_PRIMARY, labelW: 92 });
   },
 
   /* ---------- 单位（债权主体）条形图 ---------- */
   unitChart(bars) {
-    return this.barChart(bars, { color: '#0d9488', labelW: 76 });
+    return this.barChart(bars, { color: C_TEAL, labelW: 76 });
   },
 
   /* ---------- 客户条形图（长名称，标签加宽） ---------- */
   custChart(bars) {
-    return this.barChart(bars, { color: '#7c3aed', labelW: 128, labelMax: 12 });
+    return this.barChart(bars, { color: C_VIOLET, labelW: 128, labelMax: 12 });
   },
 
   /* ---------- 客户属性条形图（按大类着色） ---------- */
   attrChart(bars) {
-    const colorOf = name => {
-      const map = [[/^内部单位/, '#64748b'], [/^政府部门/, '#2563eb'], [/^煤矿集团/, '#ea580c'], [/^社会客户/, '#0d9488']];
-      const hit = map.find(([re]) => re.test(name));
-      return hit ? hit[1] : '#94a3b8';
-    };
-    return this.barChart(bars, { labelW: 118, labelMax: 10, colorBy: colorOf });
+    return this.barChart(bars, { labelW: 118, labelMax: 10, colorBy: name => groupColorOf(name) });
   },
 
   /* 客户属性大类图例（含各类合计） */
   attrLegend(groupTotals) {
     const entries = Object.entries(groupTotals).sort((a, b) => b[1] - a[1]);
     if (!entries.length) return '';
-    const GROUP_COLORS = { '内部单位': '#64748b', '政府部门': '#2563eb', '煤矿集团': '#ea580c', '社会客户': '#0d9488' };
     return `<div class="dash-legend">${entries.map(([g, v]) => `
-      <div class="dash-legend-item"><i style="background:${GROUP_COLORS[g] || '#94a3b8'}"></i>${g}
+      <div class="dash-legend-item"><i style="background:${groupColorOf(g)}"></i>${g}
         <b>${this.wan(v)}</b><span>欠款</span>
       </div>`).join('')}</div>`;
   },
 
   /* ---------- 通用水平条形图 ---------- */
   barChart(bars, opts = {}) {
-    if (!bars.length) return '<div class="dash-empty-sm">无未清应收余额</div>';
-    const color = opts.color || '#2563eb', labelW = opts.labelW || 92;
+    if (!bars.length) return '<div class="dash-empty-sm">暂无未清应收余额</div>';
+    const color = opts.color || C_PRIMARY, labelW = opts.labelW || 92;
     const labelMax = opts.labelMax || 7;
     const max = Math.max(...bars.map(b => b[1]));
     const W = 520, rowH = 34, barH = 16, valueW = 72;
@@ -353,9 +366,9 @@ const Dashboard = {
       const barColor = opts.colorBy ? opts.colorBy(name) : color;
       const label = name.length > labelMax ? name.slice(0, labelMax) + '…' : name;
       return `
-        <text x="${labelW - 8}" y="${y + barH / 2 + 4}" text-anchor="end" font-size="12" fill="#64748b">${Utils.escapeHtml(label)}</text>
-        <rect x="${labelW}" y="${y}" width="${w}" height="${barH}" rx="3" fill="${barColor}" opacity="0.85"/>
-        <text x="${labelW + w + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="#1f2937" font-weight="600">${this.wan(val)}</text>`;
+        <text x="${labelW - 8}" y="${y + barH / 2 + 4}" text-anchor="end" font-size="12" fill="${C_INK_600}">${Utils.escapeHtml(label)}</text>
+        <rect x="${labelW}" y="${y}" width="${w}" height="${barH}" rx="2" fill="${barColor}"/>
+        <text x="${labelW + w + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="${C_INK_950}" font-weight="600">${this.wan(val)}</text>`;
     }).join('');
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${svg}</svg>`;
   },
@@ -363,8 +376,8 @@ const Dashboard = {
   /* ---------- 债权状态构成（水平堆叠条 + 图例） ---------- */
   debtChart(counts, total) {
     const defs = [
-      ['正常', '#16a34a'], ['逾期', '#dc2626'], ['诉讼', '#7c3aed'],
-      ['和解', '#0d9488'], ['未填写', '#94a3b8'],
+      ['正常', C_OK], ['逾期', C_DANGER], ['诉讼', C_VIOLET],
+      ['和解', C_TEAL], ['未填写', C_INK_400],
     ].filter(([k]) => counts[k] > 0);
     if (!defs.length) return '<div class="dash-empty-sm">暂无数据</div>';
     const W = 520, H = 96, barY = 18, barH = 28;
@@ -382,9 +395,9 @@ const Dashboard = {
       </div>`).join('');
     return `
       <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">
-        <rect x="0" y="${barY}" width="${W}" height="${barH}" rx="6" fill="#eef2f7"/>
+        <rect x="0" y="${barY}" width="${W}" height="${barH}" rx="4" fill="${C_SURFACE_3}"/>
         ${segs}
-        <text x="${W / 2}" y="${barY + barH + 22}" text-anchor="middle" font-size="12" fill="#64748b">共 ${total} 笔</text>
+        <text x="${W / 2}" y="${barY + barH + 22}" text-anchor="middle" font-size="12" fill="${C_INK_500}">共 ${total} 笔</text>
       </svg>
       <div class="dash-legend">${legend}</div>`;
   },

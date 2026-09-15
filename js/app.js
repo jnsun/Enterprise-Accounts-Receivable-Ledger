@@ -24,15 +24,22 @@ const App = {
     root.innerHTML = `
       <div class="login-wrap">
         <div class="login-card">
-          <div class="login-logo">₊</div>
+          <div class="login-logo" aria-hidden="true">账</div>
           <h1 class="login-title">企业应收账款台账系统</h1>
-          <p class="login-sub">多部门应用中心 · 请使用系统分配的账号登录</p>
+          <p class="login-sub">财务资产部 · 内部台账 · 账号由管理员分配</p>
           <div class="login-form">
-            <input class="ipt" id="login-id" placeholder="邮箱 / 手机号" autocomplete="username">
-            <input class="ipt" id="login-pwd" type="password" placeholder="密码" autocomplete="current-password">
+            <label class="form-field">
+              <span class="ff-label">登录账号</span>
+              <input class="ipt" id="login-id" placeholder="邮箱或手机号" autocomplete="username">
+            </label>
+            <label class="form-field">
+              <span class="ff-label">密码</span>
+              <input class="ipt" id="login-pwd" type="password" placeholder="请输入密码" autocomplete="current-password">
+            </label>
             <button class="btn btn-primary btn-block" id="login-btn">登 录</button>
             <div id="login-error" class="editor-error hidden"></div>
           </div>
+          <p class="login-foot">忘记密码请联系财务管理员重置<br>本系统仅限单位内部使用</p>
         </div>
       </div>`;
     const doLogin = async () => {
@@ -129,8 +136,9 @@ const App = {
     if (Auth.isAdmin) items.push({ key: 'settings', label: '系统设置', icon: '⚙', show: true });
     // 无任何可见权限的部门用户也允许看总览（受 RLS 限制可能为空）
     nav.innerHTML = items.filter(i => i.show).map(i => `
-      <button class="nav-item ${i.key === this.currentView ? 'active' : ''}" data-view="${i.key}">
-        <span class="nav-icon">${i.icon}</span>${i.label}</button>`).join('');
+      <button class="nav-item ${i.key === this.currentView ? 'active' : ''}" data-view="${i.key}"
+        aria-current="${i.key === this.currentView ? 'page' : 'false'}">
+        <span class="nav-icon" aria-hidden="true">${i.icon}</span><span>${i.label}</span></button>`).join('');
     nav.querySelectorAll('.nav-item').forEach(b => b.addEventListener('click', () => this.navigate(b.dataset.view)));
 
     // 权限清单（一目了然）
@@ -156,7 +164,11 @@ const App = {
       'settings': '系统设置',
     };
     document.getElementById('topbar-title').textContent = titles[view] || '';
-    document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    document.querySelectorAll('.nav-item').forEach(b => {
+      const on = b.dataset.view === view;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-current', on ? 'page' : 'false');
+    });
 
     const page = document.getElementById('page-' + view);
     if (page) page.classList.remove('hidden');
