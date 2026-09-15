@@ -4,6 +4,9 @@
 
 线上地址：`https://www.safety.sx.cn/ledger/`（同域 Nginx 反代 Supabase API）。
 
+> **接手开发请先读 [`HANDOVER.md`](HANDOVER.md)** —— 那里有代码级接口清单、数据模型、
+> 核心口径算法、改动影响面与踩过的坑。本文只讲「有什么功能、怎么部署」。
+
 ## 功能（v3 · 新指标体系）
 
 依据《应收系统统计指标.xlsx》28 列指标与五条要求：
@@ -62,7 +65,9 @@
 │       ├── dict-preview.html           # 产物（含 #managed/#orphan/#renamed/#saveimpact/#attach/#many/#dirty/#confirm/#measure 开关）
 │       ├── build-import-preview.js     # 生成器：内联 CSS/JS → Excel 导入「预览确认」步单文件 HTML
 │       ├── import-preview.html         # 产物（含 #resolved/#nodeptcol/#unified/#measure 开关）
-│       └── verify-import-dept.js       # 回归验证：用真实源码 + 本机数据快照跑 19 项断言
+│       └── verify-import-dept.js       # 回归验证：用真实源码 + 本机数据快照跑 18 项断言
+│                                       #   ⚠ 依赖 .workbuddy/tmp-sheet.json 与 tmp-depts.json（不在仓库），
+│                                       #     缺文件会 exit(2) 并提示怎么造数据
 ├── sql/
 │   ├── init-new-instance.sql            # ★ 全新 Supabase 项目一键初始化（推荐，含回款明细）
 │   ├── schema-standalone.sql            # 基础建表（departments/profiles/ar_ 核心表）
