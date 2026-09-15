@@ -83,35 +83,55 @@ const Dashboard = {
       debtCounts[k] = (debtCounts[k] || 0) + 1;
     });
 
-    /* 部门应收余额 TOP8 */
-    const byDept = {};
-    rows.forEach(r => {
-      const k = Ledger.deptNameOf(r);
-      byDept[k] = (byDept[k] || 0) + Number(comp(r).receivable_balance || 0);
-    });
-    const deptBars = Object.entries(byDept)
-      .filter(([, v]) => v > 0)
-      .sort((a, b) => b[1] - a[1]).slice(0, 8);
+    /* ---------- 欠款口径（四张金额图统一，与「催收跟踪」一致，见提交 2dad2e4）----------
+       决算已定 → 应收余额（决算 − 到账 − 核销）
+       决算未定 → 账内应收（开票 − 到账），照样子要催、也要看
+       ⚠ 为什么必须分两段聚合而不是合成一个数：
+         ① 只看应收余额 —— 决算大面积未定的台账整张图会被清空（用户即如此反馈：
+            「各部门应收余额中没有显示各部门的余额」）。v3.1 空值口径把决算未定的行
+            一律记 0 再被 filter(v > 0) 滤掉，图就只剩零星几条甚至一条不剩。
+         ② 直接相加 —— 「应收余额」与「账内应收」是两个口径，混成一个数字会让金额
+            失去含义，财务无法核对。故按段堆叠：实色段 = 应收余额，淡色段 = 决算未定部分。 */
+    const owedOf = r => {
+      const c = comp(r);
+      const b = c.receivable_balance;
+      return b === null ? Number(c.receivable_internal) || 0 : Number(b) || 0;
+    };
+    const owedParts = r => {
+      const c = comp(r);
+      const b = c.receivable_balance;
+      return b === null ? { bal: 0, unfin: Number(c.receivable_internal) || 0 }
+                        : { bal: Number(b) || 0, unfin: 0 };
+    };
+    const unfinCount = rows.filter(r => comp(r).receivable_balance === null).length;
+    const unfinWan = rows.reduce((s, r) => s + owedParts(r).unfin, 0);
+    /* 卡片头口径注（仅当确有决算未定的行时才出现，避免常态下噪音） */
+    const unfinNote = unfinCount ? ` · 决算未定 ${unfinCount} 笔按账内应收计` : '';
+
+    /** 按任意维度聚合 → [名称, 应收余额, 决算未定按账内应收] 三元组（降序，剔除合计 ≤ 0） */
+    const agg = keyOf => {
+      const m = {};
+      rows.forEach(r => {
+        const k = keyOf(r);
+        const o = owedParts(r);
+        if (!m[k]) m[k] = [0, 0];
+        m[k][0] += o.bal;
+        m[k][1] += o.unfin;
+      });
+      return Object.entries(m)
+        .map(([k, v]) => [k, v[0], v[1]])
+        .filter(([, a, b]) => a + b > 0)
+        .sort((x, y) => (y[1] + y[2]) - (x[1] + x[2]));
+    };
+
+    /* 部门应收余额 TOP8（责任口径） */
+    const deptBars = agg(r => Ledger.deptNameOf(r)).slice(0, 8);
 
     /* 各单位（债权主体，法人口径）应收余额——部门与单位正交，按行上「单位」字段聚合 */
-    const byUnit = {};
-    rows.forEach(r => {
-      const k = r.creditor_unit || '未填写';
-      byUnit[k] = (byUnit[k] || 0) + Number(comp(r).receivable_balance || 0);
-    });
-    const unitBars = Object.entries(byUnit)
-      .filter(([, v]) => v > 0)
-      .sort((a, b) => b[1] - a[1]);
+    const unitBars = agg(r => r.creditor_unit || '未填写');
 
     /* 客户应收余额 TOP10（按客户名称聚合） */
-    const byCust = {};
-    rows.forEach(r => {
-      const k = r.owner_unit && String(r.owner_unit).trim() || '未填写';
-      byCust[k] = (byCust[k] || 0) + Number(comp(r).receivable_balance || 0);
-    });
-    const custBars = Object.entries(byCust)
-      .filter(([, v]) => v > 0)
-      .sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const custBars = agg(r => r.owner_unit && String(r.owner_unit).trim() || '未填写').slice(0, 10);
 
     /* 客户属性欠款构成（按大类着色：内部单位/政府部门/煤矿集团/社会客户） */
     const ATTR_GROUPS = [
@@ -119,26 +139,15 @@ const Dashboard = {
       ['煤矿集团', /^煤矿集团/], ['社会客户', /^社会客户/], ['其他', /.*/],
     ];
     const groupOf = name => ATTR_GROUPS.find(([, re]) => re.test(name))[0];
-    const byAttr = {};
-    rows.forEach(r => {
-      const k = r.client_attr && String(r.client_attr).trim() || '未填写';
-      byAttr[k] = (byAttr[k] || 0) + Number(comp(r).receivable_balance || 0);
-    });
-    const attrBars = Object.entries(byAttr)
-      .filter(([, v]) => v > 0)
-      .sort((a, b) => b[1] - a[1]);
+    const attrBars = agg(r => r.client_attr && String(r.client_attr).trim() || '未填写');
     const attrGroupTotals = {};
-    attrBars.forEach(([k, v]) => {
+    attrBars.forEach(([k, a, b]) => {
       const g = groupOf(k);
-      attrGroupTotals[g] = (attrGroupTotals[g] || 0) + v;
+      attrGroupTotals[g] = (attrGroupTotals[g] || 0) + a + b;
     });
 
     /* 催收跟踪 TOP10：欠款 > 0，优先逾期，再按最新催收时间最早
-       欠款口径：决算已定 = 应收余额；决算未定 = 账内应收（开票−到账，照样要催） */
-    const owedOf = r => {
-      const b = comp(r).receivable_balance;
-      return b === null ? comp(r).receivable_internal : b;
-    };
+       欠款口径同上 owedOf（决算已定 = 应收余额；决算未定 = 账内应收） */
     const tracking = rows
       .filter(r => owedOf(r) > 0)
       .sort((a, b) => {
@@ -168,6 +177,7 @@ const Dashboard = {
           <div class="kpi-label">应收余额（决算 − 到账 − 核销）</div>
           <div class="kpi-value">${this.wan(totalBalance)}</div>
           <div class="kpi-sub">已核销 ${this.wan(totalWriteoff)} · 逾期 ${debtCounts['逾期'] || 0} 笔 · 诉讼 ${debtCounts['诉讼'] || 0} 笔</div>
+          ${unfinCount ? `<div class="kpi-sub is-warn">另 ${unfinCount} 笔决算未定（账内应收 ${this.wan(unfinWan)}）按口径不计入本卡；下方金额图已按账内应收补入</div>` : ''}
         </div>
       </div>
 
@@ -183,7 +193,7 @@ const Dashboard = {
         <div class="dash-card">
           <div class="dash-card-head">
             <h3>各单位应收余额（债权主体）</h3>
-            <span class="muted">法人口径 · 按台账「单位」列聚合</span>
+            <span class="muted">法人口径 · 按台账「单位」列聚合${unfinNote}</span>
           </div>
           <div class="dash-card-body"><div data-chart="unit"></div></div>
         </div>
@@ -195,11 +205,11 @@ const Dashboard = {
 
       <div class="dash-grid even">
         <div class="dash-card">
-          <div class="dash-card-head"><h3>各部门应收余额 TOP8</h3><span class="muted">责任口径 · 按部门归属</span></div>
+          <div class="dash-card-head"><h3>各部门应收余额 TOP8</h3><span class="muted">责任口径 · 按部门归属${unfinNote}</span></div>
           <div class="dash-card-body"><div data-chart="dept"></div></div>
         </div>
         <div class="dash-card">
-          <div class="dash-card-head"><h3>客户应收余额 TOP10</h3><span class="muted">催收对象排序 · 按客户名称聚合</span></div>
+          <div class="dash-card-head"><h3>客户应收余额 TOP10</h3><span class="muted">催收对象排序 · 按客户名称聚合${unfinNote}</span></div>
           <div class="dash-card-body"><div data-chart="cust"></div></div>
         </div>
       </div>
@@ -207,7 +217,7 @@ const Dashboard = {
       <div class="dash-card">
         <div class="dash-card-head">
           <h3>客户属性欠款构成</h3>
-          <span class="muted">按 15 类客户属性聚合 · 四大类着色（政府部门 / 煤矿集团 / 社会客户 / 内部单位）</span>
+          <span class="muted">按 15 类客户属性聚合 · 四大类着色（政府部门 / 煤矿集团 / 社会客户 / 内部单位）${unfinNote}</span>
         </div>
         <div class="dash-card-body"><div data-chart="attr"></div></div>
       </div>
@@ -394,23 +404,38 @@ const Dashboard = {
 
   /* ---------- 部门条形图（责任口径） ---------- */
   deptChart(bars, W) {
-    return this.barChart(bars, { color: C_PRIMARY, labelW: 96, title: '各部门应收余额' }, W);
+    return this.barChart(bars, {
+      color: C_PRIMARY, labelW: 96, title: '各部门应收余额',
+      empty: this.EMPTY_OWED,
+    }, W);
   },
 
   /* ---------- 单位（债权主体）条形图 ---------- */
   unitChart(bars, W) {
-    return this.barChart(bars, { color: C_PRIMARY, labelW: 84, title: '各单位应收余额' }, W);
+    return this.barChart(bars, {
+      color: C_PRIMARY, labelW: 84, title: '各单位应收余额',
+      empty: this.EMPTY_OWED,
+    }, W);
   },
 
   /* ---------- 客户条形图（长名称，标签加宽） ---------- */
   custChart(bars, W) {
-    return this.barChart(bars, { color: C_PRIMARY, labelW: 132, labelMax: 12, title: '客户应收余额' }, W);
+    return this.barChart(bars, {
+      color: C_PRIMARY, labelW: 132, labelMax: 12, title: '客户应收余额',
+      empty: this.EMPTY_OWED,
+    }, W);
   },
 
   /* ---------- 客户属性条形图（按大类着色） ---------- */
   attrChart(bars, W) {
-    return this.barChart(bars, { labelW: 120, labelMax: 10, colorBy: name => groupColorOf(name), title: '客户属性欠款构成' }, W);
+    return this.barChart(bars, {
+      labelW: 120, labelMax: 10, colorBy: name => groupColorOf(name), title: '客户属性欠款构成',
+      empty: this.EMPTY_OWED,
+    }, W);
   },
+
+  /* 金额图共用的空状态文案：说明「为什么空」，而不是笼统的「暂无数据」 */
+  EMPTY_OWED: '暂无未清应收余额<br><span class="muted">应收余额与账内应收（开票−到账）均为 0 —— 或已结清、或尚未开票</span>',
 
   /* 客户属性大类图例（含各类合计） */
   attrLegend(groupTotals) {
@@ -422,28 +447,56 @@ const Dashboard = {
       </div>`).join('')}</div>`;
   },
 
-  /* ---------- 通用水平条形图（W = 容器实测宽度） ---------- */
+  /* ---------- 通用水平条形图（W = 容器实测宽度） ----------
+     每项 = [名称, 应收余额, 决算未定按账内应收]（第三项可省略）。
+     两段**堆叠**而非相加：实色段 = 应收余额（决算已定）；淡色描边段 = 决算未定部分。
+     一个数字里混两个口径会让金额失去含义（财务无法核对），故必须视觉可分。
+     opts.empty 可覆盖空状态文案 —— 「真的没欠款」与「口径把它滤空了」要说清楚。 */
   barChart(bars, opts = {}, W = 520) {
-    if (!bars.length) return '<div class="dash-empty-sm">暂无未清应收余额</div>';
+    const seg = b => [Math.max(0, Number(b[1]) || 0), Math.max(0, Number(b[2]) || 0)];
+    const totalOf = b => { const [a, c] = seg(b); return a + c; };
+    const list = (bars || []).filter(b => totalOf(b) > 0);
+    if (!list.length) return `<div class="dash-empty-sm">${opts.empty || '暂无未清应收余额'}</div>`;
     const color = opts.color || C_PRIMARY, labelW = opts.labelW || 96;
     const labelMax = opts.labelMax || 7;
-    const max = Math.max(...bars.map(b => b[1]));
+    const max = Math.max(...list.map(totalOf)) || 1;
     const rowH = 34, barH = 16, valueW = 80;
-    const H = bars.length * rowH + 8;
+    const H = list.length * rowH + 8;
     const innerW = Math.max(80, W - labelW - valueW);
-    const svg = bars.map(([name, val], i) => {
+    let hasUnfin = false;
+    const svg = list.map((b, i) => {
+      const name = b[0];
+      const [bal, unfin] = seg(b);
+      const total = bal + unfin;
       const y = 8 + i * rowH;
-      const w = Math.max(3, innerW * val / max);
+      const wAll = Math.max(3, innerW * total / max);
+      const wBal = total > 0 ? wAll * bal / total : 0;
       const barColor = opts.colorBy ? opts.colorBy(name) : color;
       const label = name.length > labelMax ? name.slice(0, labelMax) + '…' : name;
-      return `<g><title>${Utils.escapeHtml(name)} ${this.wan(val)}</title>
+      /* 淡色段 = 决算未定（账内应收）：同色相浅底 + 描边，不引入新色相（颜色只承载语义） */
+      const segUnfin = unfin > 0
+        ? `<rect x="${labelW + wBal}" y="${y}" width="${Math.max(wAll - wBal, 1.5)}" height="${barH}" rx="2"
+             fill="${barColor}" fill-opacity="0.22" stroke="${barColor}" stroke-width="1"/>` : '';
+      if (unfin > 0) hasUnfin = true;
+      const tip = unfin > 0
+        ? `${name} 合计 ${this.wan(total)}（应收余额 ${this.wan(bal)} + 决算未定按账内应收 ${this.wan(unfin)}）`
+        : `${name} ${this.wan(bal)}`;
+      return `<g><title>${Utils.escapeHtml(tip)}</title>
         <text x="${labelW - 10}" y="${y + barH / 2 + 4}" text-anchor="end" font-size="12" fill="${C_INK_600}">${Utils.escapeHtml(label)}</text>
-        <rect x="${labelW}" y="${y}" width="${w}" height="${barH}" rx="2" fill="${barColor}"/>
-        <text x="${labelW + w + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="${C_INK_950}" font-weight="600">${this.wan(val)}</text></g>`;
+        ${bal > 0 ? `<rect x="${labelW}" y="${y}" width="${Math.max(wBal, 1.5)}" height="${barH}" rx="2" fill="${barColor}"/>` : ''}
+        ${segUnfin}
+        <text x="${labelW + wAll + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="${C_INK_950}" font-weight="600">${this.wan(total)}</text></g>`;
     }).join('');
-    const aria = `${opts.title || '条形图'}：` + bars.map(([n, v]) => `${n} ${this.wan(v)}`).join('，');
+    const aria = `${opts.title || '条形图'}：`
+      + list.map(b => `${b[0]} ${this.wan(totalOf(b))}`).join('，');
+    /* 只有确有两段时才有必要解释颜色 —— 常态下不添噪音 */
+    const legend = hasUnfin ? `
+      <div class="dash-legend">
+        <div class="dash-legend-item"><i style="background:${color}"></i>应收余额（决算已定）</div>
+        <div class="dash-legend-item"><i class="hollow" style="border-color:${color}"></i>决算未定部分（按账内应收计）</div>
+      </div>` : '';
     return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${Utils.escapeHtml(aria)}"
-                 style="width:100%;max-width:${W}px;height:auto">${svg}</svg>`;
+                 style="width:100%;max-width:${W}px;height:auto">${svg}</svg>${legend}`;
   },
 
   /* ---------- 债权状态构成（水平堆叠条 + 图例） ---------- */

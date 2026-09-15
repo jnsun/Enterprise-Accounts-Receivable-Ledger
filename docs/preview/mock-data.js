@@ -28,14 +28,20 @@ const pad2 = n => String(n).padStart(2, '0');
 
 const PREVIEW_DEPT_ROWS = PREVIEW_DEPTS.map((name, i) => ({ id: 'D' + String(i + 1).padStart(3, '0'), name }));
 
-/* —— 台账模拟行（约 12% 决算未定，用于覆盖「—」口径与 KPI 附注） —— */
+/* —— 台账模拟行 ——
+   决算未定比例由 URL hash 控制：
+     默认      12%  常见状态（覆盖「—」口径与 KPI 附注）
+     #unfinal  92%  极端状态 —— 用于复现「决算大面积未定 → 应收余额口径全空」时看板的表现。
+                     真实业务里这是常态（CONTEXT.md：一般项目不专门做决算，直接以合同额替代；
+                     工作量结算项目允许留空），故必须有稳定的复现姿势。 */
+const UNFINAL = location.hash === '#unfinal';
 const LEDGER_ROWS = (() => {
   const rows = [];
   const statuses = ['完工', '施工中', '中止', '取消或作废'];
   const debts = ['正常', '正常', '正常', '逾期', '逾期', '诉讼', '和解', ''];
   for (let i = 0; i < 72; i++) {
     const dept = PREVIEW_DEPT_ROWS[Math.floor(rnd() * PREVIEW_DEPT_ROWS.length)];
-    const hasFinal = rnd() > 0.12;
+    const hasFinal = rnd() > (UNFINAL ? 0.92 : 0.12);
     const contract = money(300000, 9800000);
     const invoiced = Math.round((hasFinal ? contract : money(100000, 3000000)) * (0.25 + rnd() * 0.7));
     const received = Math.round(invoiced * rnd() * 0.95);
