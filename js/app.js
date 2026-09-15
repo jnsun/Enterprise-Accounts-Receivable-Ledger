@@ -96,6 +96,7 @@ const App = {
             <section id="page-import-guide" class="page hidden"></section>
             <section id="page-batches" class="page hidden"></section>
             <section id="page-admin" class="page hidden"></section>
+            <section id="page-dict" class="page hidden"></section>
             <section id="page-settings" class="page hidden"></section>
           </main>
         </div>
@@ -151,6 +152,7 @@ const App = {
       'import-guide': 'Excel 导入',
       'batches': '导入批次管理',
       'admin': '用户管理',
+      'dict': '选项管理',
       'settings': '系统设置',
     };
     document.getElementById('topbar-title').textContent = titles[view] || '';
