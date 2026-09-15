@@ -87,6 +87,13 @@ const Importer = {
           <div class="muted">支持 .xlsx / .xls · 建议使用标准模板（<a id="tpl-download">下载模板</a>）· 账内/账外应收自动计算，无需导入</div>
         </div>
         <input type="file" id="import-file" accept=".xlsx,.xls" class="hidden">
+        ${Auth.isAdmin ? `
+        <div class="di-entry">
+          按合同编号批量导入明细：
+          <a data-act="imp-inv">⇪ 开票明细</a> ·
+          <a data-act="imp-rec">⇪ 回款明细</a>
+          <span class="muted">（历史开票/回款 Excel，导入后自动同步金额与挂账时间）</span>
+        </div>` : ''}
         <div class="form-grid import-opts">
           <label class="form-field"><span class="ff-label">数据归属部门</span>
             <select class="ipt" id="imp-dept">${deptOpts}</select></label>
@@ -114,6 +121,16 @@ const Importer = {
       if (e.dataTransfer.files.length) this.readFile(e.dataTransfer.files[0]);
     });
     input.addEventListener('change', () => { if (input.files.length) this.readFile(input.files[0]); });
+
+    // 明细批量导入入口（仅财务）
+    document.querySelector('.di-entry [data-act="imp-inv"]')?.addEventListener('click', () => {
+      document.getElementById('modal-import')?.remove();
+      DetailImporter.open('invoice');
+    });
+    document.querySelector('.di-entry [data-act="imp-rec"]')?.addEventListener('click', () => {
+      document.getElementById('modal-import')?.remove();
+      DetailImporter.open('receipt');
+    });
   },
 
   readFile(file) {

@@ -38,6 +38,7 @@
 │   ├── ledger.js           # 台账列表 + 一屏编辑 + 附件 + 开票明细
 │   ├── attachments.js      # 附件上传 / 下载 / 删除 / 汇总
 │   ├── importer.js         # Excel 导入（字段映射）
+│   ├── detailimporter.js   # 开票/回款明细批量导入（按合同编号匹配，自动同步金额与挂账时间，仅财务）
 │   ├── exporter.js         # 汇总表导出（含合计行）
 │   ├── batches.js          # 导入批次管理
 │   ├── admin.js            # 用户 / 部门管理 / 系统设置
