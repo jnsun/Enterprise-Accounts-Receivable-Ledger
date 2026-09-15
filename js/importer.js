@@ -2,14 +2,15 @@
  * importer.js - Excel 导入模块（新指标体系 v3）
  * 流程：选择文件 -> 字段自动匹配（可人工调整映射）-> 预览确认 -> 分批写入
  *
- * - 模板 28 列：序号 / 部门名称（自动归属）+ 台账字段；账内/账外应收为自动计算列，无需导入
+ * - 模板列：序号 / 部门名称（自动归属）+ 台账字段 + 合同金额（非工作量结算时自动带入决算）；账内/账外应收为自动计算列，无需导入
  * - 「部门名称」列自动匹配数据归属部门（也可在导入时统一指定）
  * - 支持按「合同编号」跳过重复或覆盖更新
  */
 
-/* 可映射的导入目标：台账字段 + 虚拟「部门名称」（归属部门） */
+/* 可映射的导入目标：台账字段 + 虚拟「部门名称」（归属部门）+ 合同金额（旧字段，自动带入决算） */
 const IMPORT_TARGETS = [
   { key: 'department', label: '部门名称（归属部门）', aliases: ['部门名称', '部门', '施工部门'], virtual: true },
+  { key: 'contract_amount', label: '合同金额（自动带入决算）', aliases: ['合同金额', '合同价', '合同额'] },
   ...FIELD_DEFS.map(f => ({ key: f.key, label: f.label, aliases: f.aliases || [f.label] })),
 ];
 
@@ -17,13 +18,22 @@ const Importer = {
 
   /** 前端动态生成导入模板（与字段定义自动同步，含示例行） */
   downloadTemplate() {
-    const header = ['序号', '部门名称', ...FIELD_DEFS.map(f => f.label)];
-    const sample = ['1', '物探一公司',
-      'WH24-001', '某某煤业有限公司', '国有企业', '某某某地质勘查项目二维地震勘探技术服务（示例行，导入前请删除）',
-      '技术服务', '地质勘查', '完工', '合同金额', '2024-07-01',
-      100, 80, 50, 10,
-      '正常', '张三', '2025-06-30', '电话', '承认欠款，但资金紧张', '已发送第二次催款函', '跟踪付款进度',
-      '示例备注'];
+    const header = ['序号', '部门名称'];
+    const sample = ['1', '物探一公司'];
+    FIELD_DEFS.forEach(f => {
+      header.push(f.label);
+      // 决算方式后补「合同金额」列（非工作量结算时自动带入决算金额，ADR-0003）
+      if (f.key === 'final_method') { header.push('合同金额'); sample.push(100); }
+      const map = {
+        contract_no: 'WH24-001', project_name: '某某某地质勘查项目二维地震勘探技术服务（示例行，导入前请删除）',
+        owner_unit: '某某煤业有限公司', client_attr: '政府部门--省', creditor_unit: '物化院',
+        work_nature: '综合物探', sector: '能源资源勘查开发', project_status: '完工', final_method: '合同金额',
+        charge_date: '2024-07-01', final_amount: 100, invoiced_amount: 80, received_amount: 50, writeoff_amount: 10,
+        debt_status: '正常', collector: '张三', dunning_date: '2025-06-30', comm_method: '电话',
+        feedback: '承认欠款，但资金紧张', latest_progress: '已发送第二次催款函', next_plan: '跟踪付款进度', remark: '示例备注',
+      };
+      sample.push(map[f.key] !== undefined ? map[f.key] : '');
+    });
     const ws = XLSX.utils.aoa_to_sheet([header, sample]);
     ws['!cols'] = header.map(h => ({ wch: Math.max(12, h.length * 2 + 2) }));
     const wb = XLSX.utils.book_new();
@@ -217,6 +227,7 @@ const Importer = {
     const key = this.mapping[colIdx];
     if (!key) return {};
     if (key === 'department') return { __dept_name: raw === null || raw === undefined ? null : String(raw).trim() || null };
+    if (key === 'contract_amount') return { contract_amount: Utils.parseMoney(raw) };   // 旧字段，不在 FIELD_DEFS
     const f = FIELD_DEFS.find(x => x.key === key);
     if (!f) return {};
     const row = {};
@@ -311,6 +322,13 @@ const Importer = {
         }
 
         const no = obj.contract_no ? String(obj.contract_no).trim() : null;
+        // ADR-0003 合同额带入规则：决算方式非「工作量」且决算金额为空 → 合同金额自动带入
+        if (obj.final_amount === null || obj.final_amount === undefined) {
+          if (obj.contract_amount !== null && obj.contract_amount !== undefined
+              && obj.final_method && obj.final_method !== '工作量') {
+            obj.final_amount = obj.contract_amount;
+          }
+        }
         if (no && this.existingNos.has(no)) {
           if (this.dupMode === 'skip') { skipped++; return; }
           if (this.dupMode === 'overwrite') { toUpdate.push({ id: this.existingNos.get(no), payload: obj }); return; }

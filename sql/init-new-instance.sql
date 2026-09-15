@@ -1255,6 +1255,48 @@ CREATE POLICY "ar_batches_select" ON public.ar_import_batches
 --   「选项管理」页可由财务管理员维护全部下拉选项
 -- ============================================================================
 
+-- ==========================================================================
+-- 以下拼接自 upgrade-v3.1-receipts.sql（v3.1 回款明细）
+-- ==========================================================================
+
+-- --------------------------------------------------------------------------
+-- ar_receipts 回款明细表（与开票明细对称；到账金额=明细合计，仅财务可维护）
+-- --------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.ar_receipts (
+  id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  ledger_id    UUID REFERENCES public.ar_ledger(id) ON DELETE CASCADE NOT NULL,
+  receipt_date DATE NOT NULL,                                -- 到账日期
+  amount       NUMERIC(18,4) NOT NULL CHECK (amount >= 0),   -- 到账金额
+  remark       TEXT,                                         -- 备注（选填）
+  created_by   UUID REFERENCES auth.users(id),
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ar_receipts_ledger ON public.ar_receipts(ledger_id);
+
+ALTER TABLE public.ar_receipts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "ar_receipts_select" ON public.ar_receipts;
+CREATE POLICY "ar_receipts_select" ON public.ar_receipts
+  FOR SELECT TO authenticated USING (
+    EXISTS (SELECT 1 FROM public.ar_ledger l
+            WHERE l.id = ar_receipts.ledger_id
+              AND public.ar_can_see_row(l.department_id))
+  );
+
+DROP POLICY IF EXISTS "ar_receipts_insert" ON public.ar_receipts;
+CREATE POLICY "ar_receipts_insert" ON public.ar_receipts
+  FOR INSERT TO authenticated WITH CHECK (
+    public.ar_is_admin()
+    AND EXISTS (SELECT 1 FROM public.ar_ledger l WHERE l.id = ledger_id)
+  );
+
+DROP POLICY IF EXISTS "ar_receipts_delete" ON public.ar_receipts;
+CREATE POLICY "ar_receipts_delete" ON public.ar_receipts
+  FOR DELETE TO authenticated USING (public.ar_is_admin());
+
+GRANT SELECT, INSERT, DELETE ON public.ar_receipts TO authenticated;
+
 
 -- ==========================================================================
 -- 首个超级管理员设置（建好 Authentication 用户后执行，换掉邮箱）

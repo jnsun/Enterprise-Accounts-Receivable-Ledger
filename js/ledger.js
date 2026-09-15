@@ -1,9 +1,10 @@
 /**
  * ledger.js - 台账核心模块 v3（新指标体系）
  *
- * 列表 / 筛选 / 一项目一屏编辑 / 附件区 / 开票明细 / 删除
+ * 列表 / 筛选（默认「未结」）/ 一项目一屏编辑 / 附件区 / 开票明细 / 回款明细 / 删除
  * 计算口径：账内应收 = 开票 − 到账；账外应收 = 决算 − 开票；
  *          应收余额 = 决算 − 到账 − 核销（均为前端虚拟计算列）
+ *          决算金额为空时账外应收 / 应收余额显示「—」且不参与合计（CONTEXT.md）
  * 字段权限：非管理员（实体部门）仅可编辑催收跟踪类字段（deptEditable），
  *          新增记录时可额外填写基本信息；金额字段一律财务专属。
  */
@@ -12,7 +13,7 @@ const Ledger = {
   rows: [],                 // 当前可见台账数据
   settings: { warn_days: 90 },
   departments: [],          // 部门字典（ar_departments）
-  filters: { search: '', dept: '全部', project_status: '全部', debt_status: '全部', batch: null },
+  filters: { search: '', dept: '全部', project_status: '全部', debt_status: '全部', settled: '未结', batch: null },
   selected: new Set(),      // 勾选的行 id
   sortKey: null,
   sortDir: 1,
@@ -38,16 +39,20 @@ const Ledger = {
     await Attachments.loadCounts();
   },
 
-  /** 行的虚拟计算列 */
+  /** 行的虚拟计算列
+   *  口径（CONTEXT.md）：决算金额为空时，账外应收 / 应收余额 = null（显示"—"，
+   *  不参与看板与汇总合计）；账内应收照常计算（不依赖决算）。
+   */
   computeRow(r) {
     const inv = Number(r.invoiced_amount || 0);
     const recv = Number(r.received_amount || 0);
-    const fin = Number(r.final_amount || 0);
     const wo = Number(r.writeoff_amount || 0);
+    const hasFinal = r.final_amount !== null && r.final_amount !== undefined && r.final_amount !== '';
+    const fin = hasFinal ? Number(r.final_amount) : null;
     return {
       receivable_internal: Math.round((inv - recv) * 10000) / 10000,
-      receivable_external: Math.round((fin - inv) * 10000) / 10000,
-      receivable_balance: Math.round((fin - recv - wo) * 10000) / 10000,
+      receivable_external: fin === null ? null : Math.round((fin - inv) * 10000) / 10000,
+      receivable_balance: fin === null ? null : Math.round((fin - recv - wo) * 10000) / 10000,
       attach_summary: Attachments.summaryText(r.id),
     };
   },
@@ -64,6 +69,14 @@ const Ledger = {
       : (this.departments.find(d => d.name === this.filters.dept) || {}).id;
     return this.rows.filter(r => {
       if (this.filters.batch && r.batch_id !== this.filters.batch) return false;
+      // 结清状态（CONTEXT.md「记录生命周期」）：未结 = 应收余额 ≠ 0 或决算未定（余额不可知）
+      if (this.filters.settled === '未结') {
+        const bal = this.computeRow(r).receivable_balance;
+        if (bal === 0) return false;
+      } else if (this.filters.settled === '已结清') {
+        const bal = this.computeRow(r).receivable_balance;
+        if (bal !== 0) return false;
+      }
       if (deptId && r.department_id !== deptId) return false;
       if (this.filters.project_status !== '全部' && (r.project_status || '未填写') !== this.filters.project_status) return false;
       if (this.filters.debt_status !== '全部' && (r.debt_status || '未填写') !== this.filters.debt_status) return false;
@@ -117,6 +130,7 @@ const Ledger = {
       `<button class="capsule ${val === cur ? 'active' : ''}" data-group="${group}" data-val="${Utils.escapeHtml(val)}">${Utils.escapeHtml(val)}</button>`;
     return `
       <div class="capsule-row"><span class="capsule-label">部门</span>${depts.length ? depts.map(d => cap('dept', d, this.filters.dept)).join('') : '<span class="muted">暂无数据</span>'}</div>
+      <div class="capsule-row"><span class="capsule-label">结清状态</span>${['未结', '已结清', '全部'].map(s => cap('settled', s, this.filters.settled)).join('')}</div>
       <div class="capsule-row"><span class="capsule-label">项目状态</span>${statuses.map(p => cap('project_status', p, this.filters.project_status)).join('')}</div>
       <div class="capsule-row"><span class="capsule-label">债权状态</span>${debts.map(s => cap('debt_status', s, this.filters.debt_status)).join('')}</div>`;
   },
@@ -152,6 +166,7 @@ const Ledger = {
         if (f.type === 'money') {
           const isCalc = f.key in comp;
           const val = isCalc ? comp[f.key] : v;
+          if (isCalc && val === null) return `<td class="ta-r td-money muted" title="决算金额未定，暂不计算">—</td>`;
           const neg = Number(val) < 0;
           return `<td class="ta-r td-money ${neg ? 'neg' : ''}">${Utils.fmtMoney(val)}</td>`;
         }
@@ -293,7 +308,7 @@ const Ledger = {
       if (!row) return;
       if (act === 'edit') Editor.open(row);
       if (act === 'del' && Auth.can('delete')) {
-        const ok = await Utils.confirm(`确定删除该条台账记录？\n合同编号：${row.contract_no || '（空）'}\n项目：${Utils.clampName(row.project_name)}\n该记录的附件与开票明细将一并删除。`, { danger: true, confirmText: '删除' });
+        const ok = await Utils.confirm(`确定删除该条台账记录？\n合同编号：${row.contract_no || '（空）'}\n项目：${Utils.clampName(row.project_name)}\n该记录的附件与开票/回款明细将一并删除。`, { danger: true, confirmText: '删除' });
         if (!ok) return;
         const { error } = await sb.from('ar_ledger').delete().eq('id', id);
         if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
@@ -307,7 +322,7 @@ const Ledger = {
   async deleteSelected() {
     const ids = [...this.selected];
     if (!ids.length) return;
-    const ok = await Utils.confirm(`确定删除选中的 ${ids.length} 条台账记录？\n删除后不可恢复（附件与开票明细将一并删除）。`, { danger: true, confirmText: '删除' });
+    const ok = await Utils.confirm(`确定删除选中的 ${ids.length} 条台账记录？\n删除后不可恢复（附件与开票/回款明细将一并删除）。`, { danger: true, confirmText: '删除' });
     if (!ok) return;
     const { error } = await sb.from('ar_ledger').delete().in('id', ids);
     if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
@@ -351,10 +366,12 @@ const Editor = {
     this.row = row;
     this.isNew = !row;
     Attachments.rows = [];
+    this.receipts = [];
     this.renderModal();
     if (!this.isNew) {
       Attachments.loadFor(row.id).then(() => this.renderAttachments());
       this.loadInvoices();
+      this.loadReceipts();
     }
     this.loadOwnerUnits();
   },
@@ -439,7 +456,13 @@ const Editor = {
       </div>`;
     };
 
-    // 状态与金额：追加实时计算条
+    // 状态与金额：合同金额（自动带入决算）+ 实时计算条
+    const r0 = this.row || {};
+    const contractAmtField = `
+      <label class="form-field" title="决算方式非「工作量」时，保存后合同金额自动带入决算金额（可手动修改）">
+        <span class="ff-label">合同金额<i style="font-style:normal;color:var(--text-3)">（自动带入决算）</i></span>
+        <input type="number" step="0.0001" class="ipt ta-r" id="ed-contract_amount" value="${r0.contract_amount === null || r0.contract_amount === undefined ? '' : r0.contract_amount}">
+      </label>`;
     const calcBar = `
       <div class="calc-bar" id="calc-bar">
         <span>账内应收 <b id="calc-internal">—</b><i>= 开票 − 到账</i></span>
@@ -453,6 +476,7 @@ const Editor = {
           <select class="ipt" id="ed-department_id">${deptOpts}</select></label>` : ''}
         <div class="form-grid">
           ${FORM_GROUPS[1].fields.map(k => this.fieldCell(k)).join('')}
+          ${isAdmin ? contractAmtField : ''}
         </div>
         ${calcBar}
       </div>`;
@@ -467,6 +491,12 @@ const Editor = {
       <div class="form-sec" id="sec-invoices">
         <div class="form-sec-title">开票明细<span class="muted" style="font-weight:400">（逐笔登记，「开票金额」可一键同步合计）</span></div>
         <div id="invoice-pane"><div class="loading-hint">开票明细加载中…</div></div>
+      </div>`;
+
+    const receiptSec = `
+      <div class="form-sec" id="sec-receipts">
+        <div class="form-sec-title">回款明细<span class="muted" style="font-weight:400">（逐笔登记到账，「到账金额」可一键同步合计，仅财务）</span></div>
+        <div id="receipt-pane"><div class="loading-hint">回款明细加载中…</div></div>
       </div>`;
 
     const el = document.createElement('div');
@@ -486,6 +516,7 @@ const Editor = {
           ${sec('dunning')}
           ${attachSec}
           ${invoiceSec}
+          ${receiptSec}
           <div id="editor-error" class="editor-error hidden"></div>
         </div>
         <div class="modal-footer">
@@ -508,6 +539,30 @@ const Editor = {
     ['final_amount', 'invoiced_amount', 'received_amount', 'writeoff_amount'].forEach(k => {
       el.querySelector('#ed-' + k)?.addEventListener('input', () => this.syncCalc(el));
     });
+
+    // 合同额自动带入决算（ADR-0003）：决算方式非「工作量」且决算金额为空时带入
+    const finalMethodSel = el.querySelector('#ed-final_method');
+    const contractAmt = el.querySelector('#ed-contract_amount');
+    const finalAmt = el.querySelector('#ed-final_amount');
+    const currentMethod = () => {
+      if (!finalMethodSel) return '';
+      if (finalMethodSel.value === '__other__') {
+        const free = el.querySelector('#ed-final_method__free');
+        return free ? free.value.trim() : '';
+      }
+      return finalMethodSel.value || '';
+    };
+    const autoFillFinal = () => {
+      if (!contractAmt || !finalAmt || finalAmt.disabled) return;
+      const m = currentMethod();
+      if (m && m !== '工作量' && finalAmt.value === '' && contractAmt.value !== '') {
+        finalAmt.value = contractAmt.value;
+        this.syncCalc(el);
+        Utils.toast('已按合同金额带入「决算金额」（决算方式非工作量），可手动修改', 'info');
+      }
+    };
+    finalMethodSel?.addEventListener('change', autoFillFinal);
+    contractAmt?.addEventListener('input', autoFillFinal);
 
     // 「其他（自由填写）」联动
     el.querySelectorAll('.sel-free').forEach(box => {
@@ -553,12 +608,15 @@ const Editor = {
 
   syncCalc(el) {
     const num = id => { const n = el.querySelector('#ed-' + id); return n && !n.disabled ? Number(n.value || 0) : Number((this.row || {})[id] || 0); };
-    const fin = num('final_amount'), inv = num('invoiced_amount'),
-          recv = num('received_amount'), wo = num('writeoff_amount');
-    const set = (id, v) => { const n = el.querySelector('#' + id); if (n) n.textContent = Utils.fmtMoney(Math.round(v * 100) / 100) || '0'; };
+    const raw = id => { const n = el.querySelector('#ed-' + id); return n && !n.disabled ? n.value : (this.row || {})[id]; };
+    const inv = num('invoiced_amount'), recv = num('received_amount'), wo = num('writeoff_amount');
+    // 决算未定（输入为空）→ 账外应收 / 应收余额显示「—」（CONTEXT.md 金额口径）
+    const hasFin = raw('final_amount') !== '' && raw('final_amount') !== null && raw('final_amount') !== undefined;
+    const fin = hasFin ? Number(raw('final_amount')) : null;
+    const set = (id, v) => { const n = el.querySelector('#' + id); if (n) n.textContent = v === null ? '—' : (Utils.fmtMoney(Math.round(v * 100) / 100) || '0'); };
     set('calc-internal', inv - recv);
-    set('calc-external', fin - inv);
-    set('calc-balance', fin - recv - wo);
+    set('calc-external', fin === null ? null : fin - inv);
+    set('calc-balance', fin === null ? null : fin - recv - wo);
   },
 
   /** 收集表单并保存 */
@@ -575,6 +633,8 @@ const Editor = {
     if (Auth.isAdmin) {
       const dept = el.querySelector('#ed-department_id');
       payload.department_id = dept && dept.value ? dept.value : null;
+      const cAmt = el.querySelector('#ed-contract_amount');
+      payload.contract_amount = cAmt && cAmt.value !== '' ? Number(cAmt.value) : null;
     } else if (this.isNew && Auth.arUser && Auth.arUser.department_id) {
       payload.department_id = Auth.arUser.department_id;
     }
@@ -705,6 +765,91 @@ const Editor = {
     if (error) { Utils.toast('同步失败：' + error.message, 'error'); return; }
     Utils.toast('已同步到「开票金额」', 'success');
     this.row.invoiced_amount = sum;
+    this.syncCalc(document.getElementById('modal-editor'));
+  },
+
+  /* ---------- 回款明细（v3.1：与开票明细对称，仅财务可维护） ---------- */
+
+  receipts: [],
+
+  async loadReceipts() {
+    if (!this.row) return;
+    const { data, error } = await sb.from('ar_receipts')
+      .select('*').eq('ledger_id', this.row.id).order('receipt_date', { ascending: false });
+    if (!error) this.receipts = data || [];
+    this.renderReceiptPane();
+  },
+
+  renderReceiptPane() {
+    const pane = document.getElementById('receipt-pane');
+    if (!pane) return;
+    const isAdmin = Auth.isAdmin;   // 到账金额属财务字段，非管理员只读
+    const sum = this.receipts.reduce((s, i) => s + Number(i.amount || 0), 0);
+    if (this.isNew) {
+      pane.innerHTML = '<div class="muted" style="padding:6px 0">保存记录后即可逐笔登记回款明细。</div>';
+      return;
+    }
+    pane.innerHTML = `
+      <div class="invoice-summary">本合同累计到账：<b>${Utils.fmtMoney(sum)}</b>
+        ${isAdmin ? '<button class="btn btn-xs" data-act="sync-received">同步到「到账金额」</button>' : '<span class="muted">（仅财务可登记回款）</span>'}</div>
+      <table class="invoice-table">
+        <thead><tr><th style="width:110px">到账日期</th><th style="width:110px" class="ta-r">金额</th><th>备注</th>${isAdmin ? '<th style="width:60px">操作</th>' : ''}</tr></thead>
+        <tbody>
+          ${this.receipts.map(i => `<tr data-rec-id="${i.id}">
+            <td>${Utils.escapeHtml(i.receipt_date)}</td>
+            <td class="ta-r td-money">${Utils.fmtMoney(i.amount)}</td>
+            <td>${Utils.escapeHtml(i.remark || '')}</td>
+            ${isAdmin ? `<td><a class="link-danger" data-act="rec-del">删除</a></td>` : ''}
+          </tr>`).join('') || '<tr><td colspan="4" class="empty-cell">暂无回款记录，在下方新增</td></tr>'}
+        </tbody>
+      </table>
+      ${isAdmin ? `
+      <div class="invoice-add">
+        <input type="date" class="ipt" id="rec-date" value="${Utils.today()}">
+        <input type="number" step="0.0001" class="ipt ta-r" id="rec-amount" placeholder="到账金额" style="width:120px">
+        <input class="ipt" id="rec-remark" placeholder="备注（选填）">
+        <button class="btn btn-primary" data-act="rec-add">＋ 添加回款记录</button>
+      </div>` : ''}`;
+
+    pane.querySelector('[data-act="rec-add"]')?.addEventListener('click', () => this.addReceipt());
+    pane.querySelector('[data-act="sync-received"]')?.addEventListener('click', () => this.syncReceived(sum));
+    pane.querySelectorAll('[data-act="rec-del"]').forEach(a => a.addEventListener('click', async e => {
+      const tr = e.target.closest('tr');
+      const id = tr.dataset.recId;
+      const { error } = await sb.from('ar_receipts').delete().eq('id', id);
+      if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
+      this.receipts = this.receipts.filter(i => i.id !== id);
+      this.renderReceiptPane();
+    }));
+  },
+
+  async addReceipt() {
+    const date = document.getElementById('rec-date').value;
+    const amount = document.getElementById('rec-amount').value;
+    if (!date) { Utils.toast('请选择到账日期', 'error'); return; }
+    if (amount === '' || !(Number(amount) >= 0)) { Utils.toast('请填写到账金额', 'error'); return; }
+    const payload = {
+      ledger_id: this.row.id,
+      receipt_date: date,
+      amount: Number(amount),
+      remark: document.getElementById('rec-remark').value.trim() || null,
+      created_by: Auth.currentUser.id,
+    };
+    const { data, error } = await sb.from('ar_receipts').insert(payload).select().single();
+    if (error) { Utils.toast('添加失败：' + error.message, 'error'); return; }
+    this.receipts.unshift(data);
+    this.renderReceiptPane();
+    document.getElementById('rec-amount').value = '';
+    document.getElementById('rec-remark').value = '';
+    Utils.toast('已添加回款记录', 'success');
+  },
+
+  /** 把回款合计写回台账「到账金额」（仅财务） */
+  async syncReceived(sum) {
+    const { error } = await sb.from('ar_ledger').update({ received_amount: sum }).eq('id', this.row.id);
+    if (error) { Utils.toast('同步失败：' + error.message, 'error'); return; }
+    Utils.toast('已同步到「到账金额」', 'success');
+    this.row.received_amount = sum;
     this.syncCalc(document.getElementById('modal-editor'));
   },
 };
