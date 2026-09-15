@@ -58,7 +58,10 @@
 │       ├── build-ledger-preview.js     # 生成器：内联 CSS/JS → 台账总览单文件 HTML
 │       ├── ledger-preview.html         # 产物（含 #scrolled/#far/#core/#empty/#many/#measure 开关）
 │       ├── build-dict-preview.js       # 生成器：内联 CSS/JS → 选项管理单文件 HTML
-│       └── dict-preview.html           # 产物（含 #managed/#many/#dirty/#confirm/#measure 开关）
+│       ├── dict-preview.html           # 产物（含 #managed/#many/#dirty/#confirm/#measure 开关）
+│       ├── build-import-preview.js     # 生成器：内联 CSS/JS → Excel 导入「预览确认」步单文件 HTML
+│       ├── import-preview.html         # 产物（含 #resolved/#nodeptcol/#unified/#measure 开关）
+│       └── verify-import-dept.js       # 回归验证：用真实源码 + 本机数据快照跑 19 项断言
 ├── sql/
 │   ├── init-new-instance.sql            # ★ 全新 Supabase 项目一键初始化（推荐，含回款明细）
 │   ├── schema-standalone.sql            # 基础建表（departments/profiles/ar_ 核心表）
@@ -81,7 +84,14 @@ node docs/preview/build-dashboard-preview.js     # 重新生成 docs/preview/das
 node docs/preview/build-admin-preview.js         # 重新生成 docs/preview/admin-preview.html
 node docs/preview/build-ledger-preview.js        # 重新生成 docs/preview/ledger-preview.html
 node docs/preview/build-dict-preview.js          # 重新生成 docs/preview/dict-preview.html
+node docs/preview/build-import-preview.js        # 重新生成 docs/preview/import-preview.html
+node docs/preview/verify-import-dept.js          # 导入「归属部门」链路回归（需 .workbuddy/ 数据快照）
 ```
+
+> ⚠️ **本仓库是公开仓库，而预览产物会把数据内联进 HTML。** 因此预览数据一律用**合成**数据；
+> 需要看真实数据时加 `--real`（读 `.workbuddy/` 下的本机快照，该目录已 gitignore），
+> 产物会写到 `.workbuddy/import-preview-real.html` 而**不是** `docs/preview/`，避免误提交。
+> 新增预览生成器时请沿用这条约定。
 
 产物是**自包含单文件**（内联 `css/style.css` + 对应 JS + 模拟数据），双击即可打开：无需登录、不连数据库，用来核对版面与字号。**修改样式或对应页面代码后要重新跑一次**生成器，预览页才会同步。
 
@@ -120,6 +130,22 @@ node docs/preview/build-dict-preview.js          # 重新生成 docs/preview/dic
 | `#measure` | 注入探针浮层，打印面板填充高度 / 点击目标尺寸 / 列宽一致性 |
 
 > 预览的 `DB_DICT` 决定「哪些类别算已落库」：在里面的类别走「已自定义」，不在的走「内置默认」。**删掉某个类别时，左栏那个圆点会跟着变空心** —— 这是判断预览桩件是否与真实一致的最快办法。
+
+Excel 导入「预览确认」步预览的 hash 场景：
+
+| hash | 场景 |
+| --- | --- |
+| （无） | 2 个部门名匹配不上、19 行无法自动归属 —— 黄色告警 + 逐名指定归属下拉 |
+| `#resolved` | 已在预览页指定归属 —— 面板转绿，按钮不再提示「未指定部门」 |
+| `#nodeptcol` | 把「部门名称」列改成忽略 —— 提示整批都不会有归属部门 |
+| `#unified` | 统一归属到某个部门 —— 绿色说明，不再读部门名称列 |
+| `#measure` | 注入探针浮层，打印面板几何 / 下拉尺寸 / 预览表头行高 |
+
+> **检查清单铁律一（DOM 元素生命周期）**：`innerHTML` 一替换，里面的元素就没了。导入流程分三步，每步都在重写 `#import-body` —— 第 1 步的 `<select>`（数据归属部门、重复处理、file input）到第 2 步就**全部销毁**。凡是「第 1 步选、第 N 步用」的值，必须**选中即写回 JS 实例**，绝不能拖到提交时再 `getElementById`。本模块踩过两次（归属部门/重复策略 100% 失效、批次文件名恒为「手工批次」），症状都是**静默**的。
+>
+> **检查清单铁律二（不许静默丢数据）**：归属部门是台账的第一数据维度。导入时「某个值系统里没有」必须在**写入前**就让用户看见并给出解法，而不是 `|| null` 了事 —— 否则「导入完成 19 条」与「整列未指定」会同时成立，用户根本无从判断问题在哪。现在由 `Importer.deptPlan()` 单点判定，预览页预检、结果页点名、台账列用警示色标出，三处一致。
+>
+> **检查清单铁律三（类名别撞车）**：`css/style.css` 是全局单文件，`.dc-*` 已被选项管理（`.dc-list`/`.dc-name`/`.dc-dot`）和部门卡片（`.dc-head`/`.dc-count`/`.dc-btn`）占用。新增块用独立前缀（本次用 `.dept-check` / `.dchk-*`），否则**生效的是文件里靠后的那条规则**，改了样式却看不到变化。
 
 > **表格布局铁律一**：**不要给 `<td>` 直接写 `display:flex/grid`**。td 一旦退出表格布局，匿名单元格包裹会让表头与表体的列边界错位、单元格之间出现无色缝（看起来像"奇怪的方块 + 没对齐的线条"）。正确做法是 td 内再套一个 `<div>` 承载 flex/grid。
 
@@ -164,6 +190,25 @@ node docs/preview/build-dict-preview.js          # 重新生成 docs/preview/dic
 | ⑥ | 常用列 / 导出字段 | `ColPrefs.coreKeys()` 决定「仅常用列」「常用字段」保留哪些。**新增的重要列要加进去**，否则用户点一下就以为这一列丢了 |
 
 列定义支持的标记：`width`（列宽）/ `cls`（单元格附加 class）/ `noImport` / `deptEditable` / `dict`（选项字典类别）/ `clamp`（长文本多行截断）/ `aliases`（导入表头自动匹配）。
+
+
+### Excel 导入的「归属部门」从哪来（排查「列上全是未指定」）
+
+台账的 `department_id` 是外键，导入时按下述优先级取值，全都由 `Importer.deptPlan()` 单点判定（预览页预检与正式写入共用同一份结果）：
+
+1. **预览页逐名指定** —— 匹配不上的部门名，可在预览页直接选一个系统已有部门（或选「暂不归属」）
+2. **按「部门名称」列自动匹配** —— 先精确匹配，再走归一化匹配（去掉所有空白含全角空格、统一小写）
+3. **导入第 1 步「数据归属部门」统一指定** —— 选了具体部门时整批都归它，不再读「部门名称」列
+
+三处都拿不到就写 `null`，此时：
+
+- 预览页**写入前**就出黄色告警，列出对不上的部门名各命中多少行
+- 导入结果页再次点名（不是只报「成功写入 N 条」）
+- 台账总览「归属部门」该行以**警示色**显示「未指定」，并可用部门胶囊里的「未指定」一键筛出来
+
+**补救办法（不用改数据库）**：到「系统管理 → 部门」建好同名部门，或把 Excel 里的部门名换成系统已有的名字，然后重导时选「**覆盖更新**」+ 需要的归属方式即可补上。`ar_ledger_department_id_fkey` 是 `ON DELETE RESTRICT`，所以部门被记录引用时删不掉 —— 放心不会出现悬空外键。
+
+> 另一条线索：**导入批次管理里文件名显示「手工批次」**（而不是真实文件名）说明是用 v20260915o 及更早的版本导入的，那个版本还有「归属部门 100% 失效」等同源缺陷，建议用新版本重导一次。
 
 
 ### 已运行 v3 的库升级到 v3.1（回款明细）

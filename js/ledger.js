@@ -9,6 +9,10 @@
  *          新增记录时可额外填写基本信息；金额字段一律财务专属。
  */
 
+/** 没有归属部门的记录在界面上的显示值 / 部门胶囊里的筛选项（两处必须同一个常量，
+ *  否则胶囊会列出「未指定」但点下去筛不出东西）。 */
+const DEPT_NONE = '未指定';
+
 const Ledger = {
   rows: [],                 // 当前可见台账数据
   settings: { warn_days: 90 },
@@ -62,13 +66,17 @@ const Ledger = {
 
   deptNameOf(r) {
     const d = this.departments.find(x => x.id === r.department_id);
-    return d ? d.name : '未指定';
+    return d ? d.name : DEPT_NONE;
   },
 
   /** 筛选后的行 */
   filteredRows() {
     const kw = this.filters.search.trim().toLowerCase();
-    const deptId = this.filters.dept === '全部' ? null
+    const deptAll = this.filters.dept === '全部';
+    const deptNone = this.filters.dept === DEPT_NONE;
+    /* ⚠️ 不能只用 deptId 判断是否要筛：选「未指定」时它在部门字典里查不到，
+       deptId 为 undefined，旧写法会当成"不做筛选"，于是点「未指定」列出全部行。 */
+    const deptId = (deptAll || deptNone) ? null
       : (this.departments.find(d => d.name === this.filters.dept) || {}).id;
     return this.rows.filter(r => {
       if (this.filters.batch && r.batch_id !== this.filters.batch) return false;
@@ -80,7 +88,12 @@ const Ledger = {
         const bal = this.computeRow(r).receivable_balance;
         if (bal !== 0) return false;
       }
-      if (deptId && r.department_id !== deptId) return false;
+      /* 「未指定」只能按"部门名解析不出来"判断，不能按 department_id 是否为空判断 ——
+         两者不等价：部门 id 存在但字典里查不到（字典未加载全 / 跨标签页新增的部门）
+         同样会显示成「未指定」。显示与筛选必须用同一个口径，否则点「未指定」筛不出
+         屏幕上明明写着「未指定」的行。 */
+      if (deptNone) { if (this.deptNameOf(r) !== DEPT_NONE) return false; }
+      else if (deptId && r.department_id !== deptId) return false;
       if (this.filters.project_status !== '全部' && (r.project_status || '未填写') !== this.filters.project_status) return false;
       if (this.filters.debt_status !== '全部' && (r.debt_status || '未填写') !== this.filters.debt_status) return false;
       if (this.filters.client_attr !== '全部' && (r.client_attr && String(r.client_attr).trim() || '未填写') !== this.filters.client_attr) return false;
@@ -200,9 +213,11 @@ const Ledger = {
         if (f.type === 'date') return `<td class="ta-r td-date">${Utils.escapeHtml(v || '')}</td>`;
         if (f.key === 'project_name') return `<td class="td-name" title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(Utils.clampName(v))}</td>`;
         /* 归属部门为空时（多为导入时部门名对不上）用警示色标出来 ——
-           原先和普通单元格一个样子，整列「未指定」不容易被察觉。 */
+           原先和普通单元格一个样子，整列「未指定」不容易被察觉。
+           判据取 comp.department_id（= deptNameOf 的结果，即该格真实显示值），
+           与部门胶囊「未指定」的筛选口径严格一致。 */
         if (f.key === 'department_id') {
-          const none = !r.department_id;
+          const none = v === DEPT_NONE;
           return `<td class="td-dept${none ? ' is-none' : ''}" title="${Utils.escapeHtml(none ? '这条记录没有归属部门' : v)}">${Utils.escapeHtml(v || '')}</td>`;
         }
         if ((f.key === 'project_status' || f.key === 'debt_status') && v) {

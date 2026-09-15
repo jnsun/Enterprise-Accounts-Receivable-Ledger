@@ -13,6 +13,7 @@
  *   #scrolled   渲染后把表格横向滚到 320px，检查冻结列是否穿帮
  *   #core       启用「仅常用列」（隐藏非核心列），检查窄表下的表现
  *   #empty      清空数据，检查空状态
+ *   #nodept     造 3 行"无归属部门"，检查警示色 + 部门胶囊「未指定」筛选是否真的生效
  *   #measure    在页面顶部浮层打印冻结列几何测量结果
  *
  * 注：修改 style.css / ledger.js 后需重新运行本脚本。
@@ -152,6 +153,20 @@ const Batches = { load() {} };
   }
   Ledger.filters.settled = '全部';
 
+  /* #nodept：把前 3 行的 department_id 指到一个不存在的部门 id —— 等价于
+     「导入时部门名没匹配上，落库为 NULL」。验证两件事：
+       ① 这几行在「归属部门」列以警示色显示「未指定」（.td-dept.is-none）
+       ② 部门胶囊里的「未指定」点下去真的能筛出这几行
+     后者原先点了不生效：'未指定' 在部门字典里查不到 → deptId 为 undefined →
+     旧判据（deptId && 声明）当成了"不做筛选"，于是列出全部行。 */
+  /* 注意：本段位于生成器的模板字符串内，注释里不要出现反引号，否则会截断模板。 */
+  if (location.hash === '#nodept') {
+    /* 两种成因都要覆盖：前 2 行落库为 NULL；第 3 行的部门 id 在字典里查不到。
+       两者在界面上都显示「未指定」，也都应能被「未指定」胶囊筛出来。 */
+    Ledger.rows.slice(0, 2).forEach(r => { r.department_id = null; });
+    Ledger.rows[2].department_id = 'd-not-exist';
+  }
+
   if (location.hash === '#core') {
     ColPrefs.hidden = new Set(
       [...FIELD_DEFS, ...COMPUTED_DEFS].map(f => f.key).filter(k => !ColPrefs.coreKeys().includes(k)));
@@ -168,6 +183,32 @@ const Batches = { load() {} };
     if (location.hash === '#scrolled') wrap.scrollLeft = 320;
     if (location.hash === '#far') wrap.scrollLeft = wrap.scrollWidth;
     if (location.hash === '#many') { wrap.scrollLeft = 300; wrap.scrollTop = 260; }
+  }
+
+  if (location.hash === '#nodept') {
+    const rows = () => document.querySelectorAll('.table-wrap tbody tr');
+    const nAll = rows().length;
+    const capNone = document.querySelector('.capsule[data-group="dept"][data-val="未指定"]');
+    const nNoneBefore = document.querySelectorAll('.td-dept.is-none').length;
+    if (capNone) capNone.click();
+    const nAfter = rows().length;
+    const noneAfter = document.querySelectorAll('.td-dept.is-none').length;
+    const allAfter = document.querySelectorAll('.td-dept:not(.is-none)').length;
+    const sample = document.querySelector('.td-dept.is-none, .td-dept');
+    const txt = [
+      '部门胶囊「未指定」是否存在: ' + (capNone ? '是 ✓' : '否 ✗（列上出现未指定却没给筛选项）'),
+      '点击前 总行数=' + nAll + '  警示色单元格=' + nNoneBefore,
+      '点击后 总行数=' + nAfter + '（应为 3，原先会等于 ' + nAll + ' = 全部行）',
+      '点击后 未指定格=' + noneAfter + '  有部门格=' + allAfter + '（后者应为 0）',
+      '筛选断言: ' + (nAfter === 3 && allAfter === 0 ? '通过 ✓' : '不通过 ✗'),
+      '警示色: ' + (sample ? getComputedStyle(sample).color + ' italic=' + getComputedStyle(sample).fontStyle : '无样本'),
+      '当前 filters.dept=' + JSON.stringify(Ledger.filters.dept),
+    ];
+    const d = document.createElement('pre');
+    d.style.cssText = 'position:fixed;inset:0 0 auto 0;z-index:9999;margin:0;padding:8px 10px;' +
+      'background:#fff;color:#111;border-bottom:2px solid #c00;font:15px/1.5 monospace;white-space:pre;overflow-x:auto';
+    d.textContent = 'MEASURE>>\\n' + txt.join('\\n');
+    document.body.appendChild(d);
   }
 
   if (location.hash === '#measure' && wrap) {
@@ -274,7 +315,7 @@ body { margin: 0; padding: 0; background: var(--surface-2); }
   <b>台账总览页视觉预览</b> · 模拟台账数据，不连数据库 ·
   与真实系统同源：<code>css/style.css</code> + <code>js/ledger.js</code> ·
   <code>#scrolled</code> 横向滚到中间 · <code>#far</code> 滚到最右 · <code>#core</code> 仅常用列 ·
-  <code>#empty</code> 空状态 · <code>#measure</code> 打印几何测量
+  <code>#empty</code> 空状态 · <code>#nodept</code> 无归属部门 + 「未指定」筛选 · <code>#measure</code> 打印几何测量
 </div>
 <div class="app-shell preview-shell">
   <aside class="sidebar">
