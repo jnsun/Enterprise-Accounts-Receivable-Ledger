@@ -52,8 +52,10 @@
 │   ├── ar-users-v2.sql                  # 独立账号体系 ar_users（覆盖前者同名函数）
 │   ├── ar-user-management.sql           # 旧版用户管理（已被 ar-users-v2 取代，历史存档）
 │   ├── upgrade-v3-indicators.sql        # v3 升级：新列 + 选项字典 + 附件 + 字段保护
-│   └── upgrade-v3.1-receipts.sql        # v3.1 升级：ar_receipts 回款明细表（已运行 v3 的库执行）
-│   └── upgrade-v3.2-admin-rls.sql       # v3.2 修复：管理员判定策略（is_admin → ar_is_admin）+ 挂账时间重算函数
+│   ├── upgrade-v3.1-receipts.sql        # v3.1 升级：ar_receipts 回款明细表（已运行 v3 的库执行）
+│   ├── upgrade-v3.2-admin-rls.sql       # v3.2 修复：管理员判定策略（is_admin → ar_is_admin）+ 挂账时间重算函数
+│   ├── update-dict-seeds.sql            # 真实字典/部门种子（替换占位数据，幂等）
+│   └── verify-setup.sql                 # ★ 部署自检（只读）：迁移状态 / 策略口径 / 字典 / 权限一览
 └── vendor/                 # supabase-js / SheetJS（gitignore，正式部署拷贝到服务器；
                             # 缺失时自动回退 jsDelivr CDN）
 ```
@@ -61,6 +63,17 @@
 ### 已运行 v3 的库升级到 v3.1（回款明细）
 
 Supabase Studio SQL Editor 粘贴运行 `sql/upgrade-v3.1-receipts.sql`（幂等），前端版本号需 ≥ `?v=20260915a`。
+
+### 部署自检（推荐在每次测试前跑一遍）
+
+Supabase Studio SQL Editor 粘贴运行 `sql/verify-setup.sql`（**只读，不改数据**），会输出一张检查表：
+
+- ① 表结构：各表行数、字典条数、部门数
+- ② 迁移状态：v3 新列是否齐、v3.1 回款明细表、v3.2 维护函数、附件桶
+- ③ **策略口径**：`ar_user_perms` / `ar_settings` / `ar_ledger` 是否还残留旧 `is_admin()`（残留即 v3.2 未生效）
+- ④ 字典数据：四类选项条数、是否残留占位值
+- ⑤ 账号权限：角色分布、未分配部门账号、权限全空的报账员
+- ⑥ 数据健康：明细覆盖情况、决算为空行数、挂账时间与最近开票日期不一致的行数
 
 ### 已运行 v3 的库升级到 v3.2（管理员判定修复，必做）
 
