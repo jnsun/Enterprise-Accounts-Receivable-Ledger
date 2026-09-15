@@ -1,3 +1,10 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数据看板预览 · 企业应收账款台账系统</title>
+<style>
 /* ==========================================================================
    企业应收账款台账系统 · 样式表
    设计语言：账簿工业风 Ledger Industrial（精确 / 稳重 / 克制）
@@ -1063,3 +1070,889 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
     scroll-behavior: auto !important;
   }
 }
+
+/* —— 预览页专属：仅用于说明，不属于产品样式 —— */
+.preview-note {
+  position: sticky; top: 0; z-index: 99;
+  padding: 7px 16px; font-size: 12px; line-height: 1.6;
+  background: oklch(96% 0.03 258); color: oklch(38% 0.09 258);
+  border-bottom: 1px solid oklch(86% 0.065 258);
+}
+.preview-note b { font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="preview-note">
+  <b>看板视觉预览</b> · 数据为模拟数据（不连数据库、不发请求）· 内容与真实系统同源：
+  <code>css/style.css</code> + <code>js/dashboard.js</code> ·
+  <b>拖动浏览器窗口改变宽度，图表内文字应保持同一大小</b>（本次修复的正是这一点）
+</div>
+<div id="root"></div>
+<script>/**
+ * utils.js - 通用工具（格式化 / DOM / 提示 / 确认框 / 防抖）
+ */
+
+const Utils = {
+
+  /** HTML 转义 */
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
+  /** 金额格式化：千分位，最多 2 位小数（整数不带小数点） */
+  fmtMoney(v) {
+    if (v === null || v === undefined || v === '') return '';
+    const n = Number(v);
+    if (!isFinite(n)) return String(v);
+    const fixed = Math.abs(n) >= 1000 ? n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : String(Math.round(n * 100) / 100);
+    return fixed;
+  },
+
+  /** 解析金额输入/Excel 单元格（支持千分位、字符串） */
+  parseMoney(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    const s = String(v).replace(/[,\s￥¥]/g, '').replace(/[（）()]/g, m => m === '（' || m === '(' ? '-' : '');
+    const n = Number(s);
+    return isFinite(n) && s !== '' ? n : null;
+  },
+
+  /** 日期格式化 YYYY-MM-DD */
+  fmtDate(v) {
+    if (!v) return '';
+    if (typeof v === 'string') {
+      const m = v.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})/);
+      if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+      const d = new Date(v);
+      return isNaN(d) ? v.slice(0, 10) : d.toISOString().slice(0, 10);
+    }
+    return '';
+  },
+
+  /**
+   * Excel 日期值 -> YYYY-MM-DD
+   * SheetJS cellDates 模式给 Date 对象；数字为 Excel 序列号
+   */
+  parseExcelDate(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (v instanceof Date && !isNaN(v)) {
+      return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+    }
+    if (typeof v === 'number' && v > 20000 && v < 80000) {
+      // Excel 序列号（1900 日期系统）
+      const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return d.toISOString().slice(0, 10);
+    }
+    const s = String(v).trim();
+    if (!s) return null;
+    const m = s.match(/^(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})日?$/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+    const d = new Date(s);
+    if (!isNaN(d) && d.getFullYear() > 1990) return d.toISOString().slice(0, 10);
+    return null;
+  },
+
+  /**
+   * 项目名称等长文本截断：≤3 行 × 每行 12 个汉字，超出以 … 结尾
+   */
+  clampName(str, maxLine = 12, maxLineCount = 3) {
+    const s = String(str || '');
+    if (!s) return '';
+    const limit = maxLine * maxLineCount;
+    if (s.length <= limit) return s;
+    return s.slice(0, limit) + '…';
+  },
+
+  /** 防抖 */
+  debounce(fn, wait = 300) {
+    let t = null;
+    return function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
+  },
+
+  /** 轻提示 */
+  toast(msg, type = 'info') {
+    let box = document.getElementById('toast-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'toast-box';
+      document.body.appendChild(box);
+    }
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    box.appendChild(el);
+    setTimeout(() => { el.classList.add('show'); }, 10);
+    setTimeout(() => {
+      el.classList.remove('show');
+      setTimeout(() => el.remove(), 300);
+    }, type === 'error' ? 4200 : 2600);
+  },
+
+  /**
+   * 确认框（Promise<boolean>）
+   * @param {string} message 支持 \n 换行
+   * @param {object} opts { title, danger, confirmText }
+   */
+  confirm(message, opts = {}) {
+    return new Promise(resolve => {
+      const old = document.getElementById('modal-confirm');
+      if (old) old.remove();
+      const el = document.createElement('div');
+      el.id = 'modal-confirm';
+      el.className = 'modal-mask';
+      el.innerHTML = `
+        <div class="modal modal-sm">
+          <div class="modal-header">${Utils.escapeHtml(opts.title || '请确认')}</div>
+          <div class="modal-body confirm-msg">${Utils.escapeHtml(message).replace(/\n/g, '<br>')}</div>
+          <div class="modal-footer">
+            <button class="btn" data-act="cancel">取消</button>
+            <button class="btn ${opts.danger ? 'btn-danger' : 'btn-primary'}" data-act="ok">${Utils.escapeHtml(opts.confirmText || '确定')}</button>
+          </div>
+        </div>`;
+      document.body.appendChild(el);
+      let sx = 0, sy = 0;
+      el.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
+      el.addEventListener('click', e => {
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+        if (e.target === el || e.target.closest('[data-act="cancel"]')) { el.remove(); resolve(false); }
+        else if (e.target.closest('[data-act="ok"]')) { el.remove(); resolve(true); }
+      });
+    });
+  },
+
+  /**
+   * 弹窗遮罩点击关闭（带拖拽误触保护：按下滑动超 6px 不关闭）
+   * @param {HTMLElement} mask 遮罩元素
+   * @param {Function} onClose 点击遮罩关闭时回调
+   */
+  bindMaskClose(mask, onClose) {
+    let sx = 0, sy = 0;
+    mask.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
+    mask.addEventListener('click', e => {
+      if (e.target !== mask) return;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+      onClose();
+    });
+  },
+
+  /** 密码强度评分（0-5）：长度≥8 / 大写 / 小写 / 数字 / 符号 各计 1 分 */
+  pwdScore(v) {
+    if (!v) return 0;
+    let s = 0;
+    if (v.length >= 8) s++;
+    if (/[A-Z]/.test(v)) s++;
+    if (/[a-z]/.test(v)) s++;
+    if (/[0-9]/.test(v)) s++;
+    if (/[^A-Za-z0-9]/.test(v)) s++;
+    return s;
+  },
+
+  /** 密码是否符合强密码规则（≥8 位 + 四类字符） */
+  pwdValid(v) { return this.pwdScore(v) >= 5; },
+
+  /** 给密码输入框绑定实时强度进度条（bar 进度条元素，hint 提示元素） */
+  bindPwdMeter(input, bar, hint) {
+    /* 色阶与设计令牌同源（oklch → sRGB）：灰 → 朱砂 → 琥珀 → 橄榄 → 绿 */
+    const colors = ['#e0e3e8', '#a74639', '#975800', '#756c00', '#53760e', '#137d41'];
+    const update = () => {
+      const v = input.value;
+      const s = this.pwdScore(v);
+      const ok = this.pwdValid(v);
+      bar.style.width = (v ? Math.max(s / 5 * 100, 8) : 0) + '%';
+      bar.style.background = v ? colors[s] : colors[0];
+      if (!v) {
+        hint.textContent = '至少 8 位，须同时包含大写字母、小写字母、数字和符号';
+        hint.classList.remove('ok');
+        return;
+      }
+      const missing = [];
+      if (v.length < 8) missing.push('至少 8 位');
+      if (!/[A-Z]/.test(v)) missing.push('大写字母');
+      if (!/[a-z]/.test(v)) missing.push('小写字母');
+      if (!/[0-9]/.test(v)) missing.push('数字');
+      if (!/[^A-Za-z0-9]/.test(v)) missing.push('符号');
+      hint.textContent = ok ? '✓ 密码强度合格' : '还缺：' + missing.join('、');
+      hint.classList.toggle('ok', ok);
+    };
+    input.addEventListener('input', update);
+    update();
+  },
+
+  /** 计算两个日期相差天数（b - a） */
+  daysBetween(a, b) {
+    if (!a || !b) return null;
+    const da = new Date(a + 'T00:00:00'), db = new Date(b + 'T00:00:00');
+    if (isNaN(da) || isNaN(db)) return null;
+    return Math.round((db - da) / 86400000);
+  },
+
+  /** 今天 YYYY-MM-DD */
+  today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  },
+
+  /**
+   * 说明（2026-09-15）：原 `overdueStatus()`（按完工日期 + 预警天数自动判定超期）
+   * 已删除。它引用的 receivable_total / end_date 是 v3 已废弃字段，且按
+   * CONTEXT.md / ADR-0002 的结论——本院"按合同期限几乎全部逾期"、自动判定无区分度，
+   * 债权状态改为人工维护（「债权状态」下拉）。系统不做自动逾期判定。
+   */
+};
+</script>
+<script>/**
+ * dashboard.js - 数据看板 v3（新指标体系口径）
+ * 数据来源：Ledger.rows（RLS 已按部门权限隔离，与台账总览口径一致）
+ * 口径：账内应收 = 开票 − 到账；账外应收 = 决算 − 开票；
+ *      应收余额 = 决算 − 到账 − 核销；债权状态为手工维护（正常/逾期/诉讼/和解）
+ *      决算金额未定的行：账外应收 / 应收余额不计入合计（KPI 附提示笔数）
+ * 视角：部门（责任口径）与 单位（债权主体法人口径）正交聚合（CONTEXT.md「组织」）
+ * 趋势：月度开票/回款（数据源 ar_invoices / ar_receipts 明细表，表未建时该卡静默隐藏）
+ *
+ * 图表：纯 SVG 手绘，无外部依赖。
+ *   ⚠ 关键：SVG 用 viewBox + width:100% 时，容器比 viewBox 宽多少，图内文字就放
+ *   大多少倍（520 宽的 viewBox 放进 1400px 卡片 → 12px 文字渲染成 32px）。
+ *   因此这里**先量容器宽度再生成 viewBox**（见 paintCharts），缩放比恒为 1，
+ *   文字尺寸即设计尺寸；同时用 max-width 封顶，避免超宽屏上条形长得失去可比性。
+ * 配色：颜色只承载语义，不承载装饰——「欠款量级」类图统一主色，
+ *   仅「客户属性大类」与「债权状态」使用分类/语义色。
+ */
+
+/* —— 图表色板（对应 css/style.css :root 令牌的 sRGB 等价色）—— */
+const C_PRIMARY   = '#21539c';   // --primary
+const C_INK_950   = '#101926';   // --ink-950
+const C_INK_600   = '#5f6771';   // --ink-600
+const C_INK_500   = '#7a818b';   // --ink-500
+const C_INK_400   = '#a0a5ad';   // --ink-400
+const C_LINE      = '#e0e3e8';   // --line
+const C_SURFACE_3 = '#ecf0f5';   // --surface-3
+const C_DANGER    = '#b51f1c';   // --danger
+const C_OK        = '#267543';   // --ok
+const C_TEAL      = '#006a6a';   // --teal
+const C_VIOLET    = '#623e96';   // --violet
+
+/** 图表宽度上限：超过这个宽度条形过长、标签与数值距离过远，反而不好读 */
+const DASH_MAX_W = 1120;
+
+/** 客户属性大类着色（分类用色，刻意避开红/琥珀以免与风险语义混淆） */
+function groupColorOf(name) {
+  if (/^内部单位/.test(name)) return C_INK_600;
+  if (/^政府部门/.test(name)) return C_PRIMARY;
+  if (/^煤矿集团/.test(name)) return C_TEAL;
+  if (/^社会客户/.test(name)) return C_VIOLET;
+  return C_INK_400;
+}
+
+const Dashboard = {
+
+  /* 图表数据缓存（供窗口尺寸变化后重绘，避免重新拉数据） */
+  _ch: null,
+  _resizeBound: false,
+
+  render() {
+    const page = document.getElementById('page-dashboard');
+    if (!page) return;
+    const rows = Ledger.rows || [];
+
+    if (!rows.length) {
+      this._ch = null;
+      page.innerHTML = `
+        <div class="dash-empty">
+          <p>暂无可统计的台账数据</p>
+          <p class="muted">可能原因：账号未开放台账查看权限，或本部门尚无台账记录。</p>
+        </div>`;
+      return;
+    }
+
+    /* ---------- 汇总（决算未定的行不参与账外/余额合计，CONTEXT.md 口径） ---------- */
+    const comp = r => Ledger.computeRow(r);
+    const sum = (fn) => rows.reduce((s, r) => s + fn(r), 0);
+    const hasFinal = r => r.final_amount !== null && r.final_amount !== undefined && r.final_amount !== '';
+    const unfinalCount = rows.filter(r => !hasFinal(r)).length;
+    const finalCount = rows.length - unfinalCount;
+    const totalFinal = sum(r => Number(r.final_amount || 0));
+    const totalInvoiced = sum(r => Number(r.invoiced_amount || 0));
+    const totalReceived = sum(r => Number(r.received_amount || 0));
+    const totalWriteoff = sum(r => Number(r.writeoff_amount || 0));
+    const totalInternal = sum(r => comp(r).receivable_internal);
+    const totalExternal = sum(r => Number(comp(r).receivable_external) || 0);
+    const totalBalance = sum(r => Number(comp(r).receivable_balance) || 0);
+
+    /* 债权状态构成 */
+    const debtCounts = {};
+    rows.forEach(r => {
+      const k = r.debt_status || '未填写';
+      debtCounts[k] = (debtCounts[k] || 0) + 1;
+    });
+
+    /* 部门应收余额 TOP8 */
+    const byDept = {};
+    rows.forEach(r => {
+      const k = Ledger.deptNameOf(r);
+      byDept[k] = (byDept[k] || 0) + Number(comp(r).receivable_balance || 0);
+    });
+    const deptBars = Object.entries(byDept)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+    /* 各单位（债权主体，法人口径）应收余额——部门与单位正交，按行上「单位」字段聚合 */
+    const byUnit = {};
+    rows.forEach(r => {
+      const k = r.creditor_unit || '未填写';
+      byUnit[k] = (byUnit[k] || 0) + Number(comp(r).receivable_balance || 0);
+    });
+    const unitBars = Object.entries(byUnit)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1]);
+
+    /* 客户应收余额 TOP10（按客户名称聚合） */
+    const byCust = {};
+    rows.forEach(r => {
+      const k = r.owner_unit && String(r.owner_unit).trim() || '未填写';
+      byCust[k] = (byCust[k] || 0) + Number(comp(r).receivable_balance || 0);
+    });
+    const custBars = Object.entries(byCust)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+    /* 客户属性欠款构成（按大类着色：内部单位/政府部门/煤矿集团/社会客户） */
+    const ATTR_GROUPS = [
+      ['内部单位', /^内部单位/], ['政府部门', /^政府部门/],
+      ['煤矿集团', /^煤矿集团/], ['社会客户', /^社会客户/], ['其他', /.*/],
+    ];
+    const groupOf = name => ATTR_GROUPS.find(([, re]) => re.test(name))[0];
+    const byAttr = {};
+    rows.forEach(r => {
+      const k = r.client_attr && String(r.client_attr).trim() || '未填写';
+      byAttr[k] = (byAttr[k] || 0) + Number(comp(r).receivable_balance || 0);
+    });
+    const attrBars = Object.entries(byAttr)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1]);
+    const attrGroupTotals = {};
+    attrBars.forEach(([k, v]) => {
+      const g = groupOf(k);
+      attrGroupTotals[g] = (attrGroupTotals[g] || 0) + v;
+    });
+
+    /* 催收跟踪 TOP10：欠款 > 0，优先逾期，再按最新催收时间最早
+       欠款口径：决算已定 = 应收余额；决算未定 = 账内应收（开票−到账，照样要催） */
+    const owedOf = r => {
+      const b = comp(r).receivable_balance;
+      return b === null ? comp(r).receivable_internal : b;
+    };
+    const tracking = rows
+      .filter(r => owedOf(r) > 0)
+      .sort((a, b) => {
+        const ra = a.debt_status === '逾期' ? 0 : 1, rb = b.debt_status === '逾期' ? 0 : 1;
+        if (ra !== rb) return ra - rb;
+        return String(a.dunning_date || '9999').localeCompare(String(b.dunning_date || '9999'));
+      }).slice(0, 10);
+
+    page.innerHTML = `
+      <div class="dash-kpis">
+        <div class="kpi-card">
+          <div class="kpi-label">决算总额（应收总量）</div>
+          <div class="kpi-value">${this.wan(totalFinal)}</div>
+          <div class="kpi-sub">共 ${rows.length} 笔 · 已定案 ${finalCount} 笔 · 开票 ${this.wan(totalInvoiced)}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">账内应收（开票 − 到账）</div>
+          <div class="kpi-value kpi-blue">${this.wan(totalInternal)}</div>
+          <div class="kpi-sub">已开票未回款 · 已到账 ${this.wan(totalReceived)}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">账外应收（决算 − 开票）</div>
+          <div class="kpi-value">${this.wan(totalExternal)}</div>
+          <div class="kpi-sub">已决算未开票${unfinalCount ? ` · ${unfinalCount} 笔决算未定未计入` : ''}</div>
+        </div>
+        <div class="kpi-card kpi-danger">
+          <div class="kpi-label">应收余额（决算 − 到账 − 核销）</div>
+          <div class="kpi-value">${this.wan(totalBalance)}</div>
+          <div class="kpi-sub">已核销 ${this.wan(totalWriteoff)} · 逾期 ${debtCounts['逾期'] || 0} 笔 · 诉讼 ${debtCounts['诉讼'] || 0} 笔</div>
+        </div>
+      </div>
+
+      <div class="dash-card" id="dash-trend" style="display:none">
+        <div class="dash-card-head">
+          <h3>月度开票 / 回款趋势</h3>
+          <span class="muted">近 12 个月 · 按明细发生额 · <span id="dash-trend-note"></span></span>
+        </div>
+        <div class="dash-card-body"><div data-chart="trend"></div></div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="dash-card">
+          <div class="dash-card-head">
+            <h3>各单位应收余额（债权主体）</h3>
+            <span class="muted">法人口径 · 按台账「单位」列聚合</span>
+          </div>
+          <div class="dash-card-body"><div data-chart="unit"></div></div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-head"><h3>债权状态构成</h3><span class="muted">人工维护的处置阶段</span></div>
+          <div class="dash-card-body"><div data-chart="debt"></div></div>
+        </div>
+      </div>
+
+      <div class="dash-grid even">
+        <div class="dash-card">
+          <div class="dash-card-head"><h3>各部门应收余额 TOP8</h3><span class="muted">责任口径 · 按部门归属</span></div>
+          <div class="dash-card-body"><div data-chart="dept"></div></div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-head"><h3>客户应收余额 TOP10</h3><span class="muted">催收对象排序 · 按客户名称聚合</span></div>
+          <div class="dash-card-body"><div data-chart="cust"></div></div>
+        </div>
+      </div>
+
+      <div class="dash-card">
+        <div class="dash-card-head">
+          <h3>客户属性欠款构成</h3>
+          <span class="muted">按 15 类客户属性聚合 · 四大类着色（政府部门 / 煤矿集团 / 社会客户 / 内部单位）</span>
+        </div>
+        <div class="dash-card-body"><div data-chart="attr"></div></div>
+      </div>
+
+      <div class="dash-card">
+        <div class="dash-card-head">
+          <h3>催收跟踪 TOP10</h3>
+          <span class="muted">逾期优先 · 再按最新催收时间从早到晚 · 决算未定按账内应收计</span>
+        </div>
+        <div class="table-wrap">
+          <table class="ledger-table dash-table">
+            <thead><tr>
+              <th style="min-width:100px;max-width:100px">合同编号</th>
+              <th style="min-width:200px;max-width:200px">项目名称</th>
+              <th style="min-width:90px;max-width:90px">部门</th>
+              <th style="min-width:100px;max-width:100px" class="ta-r">应收余额</th>
+              <th style="min-width:84px;max-width:84px" class="ta-r">债权状态</th>
+              <th style="min-width:104px;max-width:104px" class="ta-r">最新催收时间</th>
+              <th style="min-width:90px;max-width:90px">清收责任人</th>
+            </tr></thead>
+            <tbody>
+              ${tracking.length
+                ? tracking.map(r => `
+                  <tr>
+                    <td title="${Utils.escapeHtml(r.contract_no || '')}">${Utils.escapeHtml(r.contract_no || '—')}</td>
+                    <td class="td-name" title="${Utils.escapeHtml(r.project_name || '')}">${Utils.escapeHtml(Utils.clampName(r.project_name || '（未填项目）'))}</td>
+                    <td>${Utils.escapeHtml(Ledger.deptNameOf(r))}</td>
+                    <td class="ta-r td-money owed" ${comp(r).receivable_balance === null ? 'title="决算未定，此处为账内应收（开票−到账）"' : ''}>${Utils.fmtMoney(owedOf(r))}${comp(r).receivable_balance === null ? '<span class="muted">*</span>' : ''}</td>
+                    <td class="ta-r">${r.debt_status ? `<span class="tag ${TAG_COLORS[r.debt_status] || 'tag-gray'}">${Utils.escapeHtml(r.debt_status)}</span>` : '—'}</td>
+                    <td class="ta-r">${Utils.escapeHtml(r.dunning_date || '—')}</td>
+                    <td>${Utils.escapeHtml(r.collector || '—')}</td>
+                  </tr>`).join('')
+                : '<tr><td colspan="7" class="empty-cell">暂无未清收合同 ✓</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+
+    /* 图表数据入缓存 → 量宽绘制（render 时页面已可见，clientWidth 有效） */
+    this._ch = {
+      unit: unitBars, dept: deptBars, cust: custBars,
+      attr: attrBars, attrTotals: attrGroupTotals,
+      debt: { counts: debtCounts, total: rows.length },
+      trend: null,
+    };
+    this.bindResize();
+    this.paintCharts();
+    this.loadTrend();
+  },
+
+  /* ---------- 按容器实测宽度绘制全部图表（缩放比恒为 1） ---------- */
+  paintCharts() {
+    const page = document.getElementById('page-dashboard');
+    const ch = this._ch;
+    if (!page || !ch) return;
+
+    const paint = (name, build) => {
+      const el = page.querySelector(`[data-chart="${name}"]`);
+      if (!el) return;
+      const w = Math.round(el.clientWidth);
+      if (!w || w < 80) return;   // 容器不可见（如趋势卡尚未展开）→ 稍后重绘
+      el.innerHTML = build(Math.min(w, DASH_MAX_W));
+    };
+
+    paint('unit', w => this.unitChart(ch.unit, w));
+    paint('debt', w => this.debtChart(ch.debt.counts, ch.debt.total, w));
+    paint('dept', w => this.deptChart(ch.dept, w));
+    paint('cust', w => this.custChart(ch.cust, w));
+    paint('attr', w => this.attrChart(ch.attr, w) + this.attrLegend(ch.attrTotals));
+    if (ch.trend) paint('trend', w => this.trendChart(ch.trend.months, ch.trend.invMap, ch.trend.recvMap, w));
+  },
+
+  /* 窗口尺寸变化 → 防抖重绘（不重新请求数据） */
+  bindResize() {
+    if (this._resizeBound) return;
+    this._resizeBound = true;
+    let timer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (typeof App !== 'undefined' && App.currentView === 'dashboard') this.paintCharts();
+      }, 160);
+    });
+  },
+
+  /* ---------- 月度开票/回款趋势（ar_invoices / ar_receipts 明细聚合） ---------- */
+  async loadTrend() {
+    const card = document.getElementById('dash-trend');
+    if (!card) return;
+
+    /* 近 12 个月起始日（含当月） */
+    const since = new Date();
+    since.setMonth(since.getMonth() - 11, 1);
+    const sinceStr = since.toISOString().slice(0, 10);
+
+    let inv, recv;
+    try {
+      [inv, recv] = await Promise.all([
+        sb.from('ar_invoices').select('invoice_date,amount').gte('invoice_date', sinceStr),
+        sb.from('ar_receipts').select('receipt_date,amount').gte('receipt_date', sinceStr),
+      ]);
+    } catch (e) { card.remove(); return; }
+    /* 明细表未建（upgrade-v3.1-receipts.sql 未执行）或查询失败 → 静默隐藏整卡 */
+    if ((inv && inv.error) || (recv && recv.error)) { card.remove(); return; }
+
+    /* 页面可能已切走，缓存已重置 */
+    if (!this._ch) return;
+
+    const months = [];
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    const bucket = (arr, dateKey) => {
+      const m = {};
+      (arr || []).forEach(x => {
+        const k = String(x[dateKey] || '').slice(0, 7);
+        if (k) m[k] = (m[k] || 0) + Number(x.amount || 0);
+      });
+      return m;
+    };
+    const invMap = bucket(inv.data, 'invoice_date');
+    const recvMap = bucket(recv.data, 'receipt_date');
+
+    /* 本自然月摘要 */
+    const curMonth = months[months.length - 1];
+    const note = document.getElementById('dash-trend-note');
+    if (note) note.textContent = `本月已开票 ${this.wan(invMap[curMonth] || 0)} · 已回款 ${this.wan(recvMap[curMonth] || 0)}`;
+
+    this._ch.trend = { months, invMap, recvMap };
+    card.style.display = '';
+    this.paintCharts();
+  },
+
+  /* 月度双序列分组柱状图：开票（蓝）/ 回款（绿） */
+  trendChart(months, invMap, recvMap, W = 560) {
+    const vals = months.map(m => [Number(invMap[m] || 0), Number(recvMap[m] || 0)]);
+    if (!vals.some(v => v[0] > 0 || v[1] > 0)) {
+      return '<div class="dash-empty-sm">近 12 个月无开票 / 回款明细记录<br><span class="muted">在编辑弹窗的「开票明细 / 回款明细」区块登记后，此处自动汇总</span></div>';
+    }
+    const max = Math.max(...vals.flat());
+    const H = 196, top = 28, bottom = 42;
+    const plotH = H - top - bottom;
+    const groupW = W / months.length;
+    /* 柱宽随容器伸缩，但设上限，避免超宽屏上柱子变成细线、柱间出现大空洞 */
+    const barW = Math.max(5, Math.min(20, groupW * 0.30));
+    const y = v => top + plotH * (1 - v / max);
+
+    const bars = months.map((m, i) => {
+      const cx = i * groupW + groupW / 2;
+      const [iv, rv] = vals[i];
+      const x1 = cx - barW - 1, x2 = cx + 1;
+      const label = Number(m.slice(5)) + '月';
+      const lab = i === 0 || Number(m.slice(5)) === 1 ? String(m.slice(2, 4)) + '年' : label;
+      const t1 = iv > 0 ? `<text x="${x1 + barW / 2}" y="${y(iv) - 5}" text-anchor="middle" font-size="9" fill="${C_PRIMARY}">${this.wanShort(iv)}</text>` : '';
+      const t2 = rv > 0 ? `<text x="${x2 + barW / 2}" y="${y(rv) - 5}" text-anchor="middle" font-size="9" fill="${C_OK}">${this.wanShort(rv)}</text>` : '';
+      /* 悬停显示精确金额（柱顶标注为短格式，避免相邻柱标签重叠） */
+      const tip = `${m.slice(0, 4)}年${Number(m.slice(5))}月 · 开票 ${Utils.fmtMoney(iv)} · 回款 ${Utils.fmtMoney(rv)}`;
+      return `<g><title>${Utils.escapeHtml(tip)}</title>
+        ${t1}<rect x="${x1}" y="${y(iv)}" width="${barW}" height="${Math.max(top + plotH - y(iv), iv > 0 ? 2 : 0)}" rx="2" fill="${C_PRIMARY}"/>
+        ${t2}<rect x="${x2}" y="${y(rv)}" width="${barW}" height="${Math.max(top + plotH - y(rv), rv > 0 ? 2 : 0)}" rx="2" fill="${C_OK}"/>
+        <text x="${cx}" y="${H - 18}" text-anchor="middle" font-size="11" fill="${C_INK_500}">${lab}</text></g>`;
+    }).join('');
+    const axis = `<line x1="0" y1="${top + plotH}" x2="${W}" y2="${top + plotH}" stroke="${C_LINE}"/>`;
+    return `
+      <svg viewBox="0 0 ${W} ${H}" role="img"
+           aria-label="近 12 个月开票与回款趋势柱状图" style="width:100%;max-width:${W}px;height:auto">${axis}${bars}</svg>
+      <div class="dash-legend">
+        <div class="dash-legend-item"><i style="background:${C_PRIMARY}"></i>开票</div>
+        <div class="dash-legend-item"><i style="background:${C_OK}"></i>回款</div>
+        <div class="dash-legend-item muted">柱顶为万元短标注 · 悬停看精确金额</div>
+      </div>`;
+  },
+
+  /** 金额短格式（趋势图柱顶标注用，无货币符） */
+  wanShort(n) {
+    const v = Number(n) || 0;
+    const abs = Math.abs(v);
+    if (abs >= 100000000) return (v / 100000000).toFixed(1).replace(/\.0$/, '') + '亿';
+    if (abs >= 10000) return (v / 10000).toFixed(abs >= 1000000 ? 0 : 1).replace(/\.0$/, '') + '万';
+    return String(Math.round(v));
+  },
+
+  /* ---------- 部门条形图（责任口径） ---------- */
+  deptChart(bars, W) {
+    return this.barChart(bars, { color: C_PRIMARY, labelW: 96, title: '各部门应收余额' }, W);
+  },
+
+  /* ---------- 单位（债权主体）条形图 ---------- */
+  unitChart(bars, W) {
+    return this.barChart(bars, { color: C_PRIMARY, labelW: 84, title: '各单位应收余额' }, W);
+  },
+
+  /* ---------- 客户条形图（长名称，标签加宽） ---------- */
+  custChart(bars, W) {
+    return this.barChart(bars, { color: C_PRIMARY, labelW: 132, labelMax: 12, title: '客户应收余额' }, W);
+  },
+
+  /* ---------- 客户属性条形图（按大类着色） ---------- */
+  attrChart(bars, W) {
+    return this.barChart(bars, { labelW: 120, labelMax: 10, colorBy: name => groupColorOf(name), title: '客户属性欠款构成' }, W);
+  },
+
+  /* 客户属性大类图例（含各类合计） */
+  attrLegend(groupTotals) {
+    const entries = Object.entries(groupTotals).sort((a, b) => b[1] - a[1]);
+    if (!entries.length) return '';
+    return `<div class="dash-legend">${entries.map(([g, v]) => `
+      <div class="dash-legend-item"><i style="background:${groupColorOf(g)}"></i>${g}
+        <b>${this.wan(v)}</b><span>欠款</span>
+      </div>`).join('')}</div>`;
+  },
+
+  /* ---------- 通用水平条形图（W = 容器实测宽度） ---------- */
+  barChart(bars, opts = {}, W = 520) {
+    if (!bars.length) return '<div class="dash-empty-sm">暂无未清应收余额</div>';
+    const color = opts.color || C_PRIMARY, labelW = opts.labelW || 96;
+    const labelMax = opts.labelMax || 7;
+    const max = Math.max(...bars.map(b => b[1]));
+    const rowH = 34, barH = 16, valueW = 80;
+    const H = bars.length * rowH + 8;
+    const innerW = Math.max(80, W - labelW - valueW);
+    const svg = bars.map(([name, val], i) => {
+      const y = 8 + i * rowH;
+      const w = Math.max(3, innerW * val / max);
+      const barColor = opts.colorBy ? opts.colorBy(name) : color;
+      const label = name.length > labelMax ? name.slice(0, labelMax) + '…' : name;
+      return `<g><title>${Utils.escapeHtml(name)} ${this.wan(val)}</title>
+        <text x="${labelW - 10}" y="${y + barH / 2 + 4}" text-anchor="end" font-size="12" fill="${C_INK_600}">${Utils.escapeHtml(label)}</text>
+        <rect x="${labelW}" y="${y}" width="${w}" height="${barH}" rx="2" fill="${barColor}"/>
+        <text x="${labelW + w + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="${C_INK_950}" font-weight="600">${this.wan(val)}</text></g>`;
+    }).join('');
+    const aria = `${opts.title || '条形图'}：` + bars.map(([n, v]) => `${n} ${this.wan(v)}`).join('，');
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${Utils.escapeHtml(aria)}"
+                 style="width:100%;max-width:${W}px;height:auto">${svg}</svg>`;
+  },
+
+  /* ---------- 债权状态构成（水平堆叠条 + 图例） ---------- */
+  debtChart(counts, total, W = 520) {
+    const defs = [
+      ['正常', C_OK], ['逾期', C_DANGER], ['诉讼', C_VIOLET],
+      ['和解', C_TEAL], ['未填写', C_INK_400],
+    ].filter(([k]) => counts[k] > 0);
+    if (!defs.length) return '<div class="dash-empty-sm">暂无数据</div>';
+    const H = 96, barY = 18, barH = 28;
+    let x = 0;
+    const segs = defs.map(([key, color]) => {
+      const w = W * counts[key] / total;
+      const seg = `<rect x="${x}" y="${barY}" width="${Math.max(w - 1, 1)}" height="${barH}" fill="${color}"><title>${key} ${counts[key]} 笔</title></rect>`;
+      x += w;
+      return seg;
+    }).join('');
+    const legend = defs.map(([key, color]) => `
+      <div class="dash-legend-item">
+        <i style="background:${color}"></i>${key}
+        <b>${counts[key]}</b><span>笔 · ${Math.round(counts[key] / total * 100)}%</span>
+      </div>`).join('');
+    const aria = `债权状态构成：` + defs.map(([k]) => `${k} ${counts[k]} 笔`).join('，');
+    return `
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${Utils.escapeHtml(aria)}"
+           style="width:100%;max-width:${W}px;height:auto">
+        <rect x="0" y="${barY}" width="${W}" height="${barH}" rx="4" fill="${C_SURFACE_3}"/>
+        ${segs}
+        <text x="${W / 2}" y="${barY + barH + 22}" text-anchor="middle" font-size="12" fill="${C_INK_500}">共 ${total} 笔</text>
+      </svg>
+      <div class="dash-legend">${legend}</div>`;
+  },
+
+  /** 金额 → 万元可读格式 */
+  wan(n) {
+    const v = Number(n) || 0;
+    const abs = Math.abs(v);
+    if (abs >= 100000000) return '¥' + (v / 100000000).toFixed(abs >= 1000000000 ? 0 : 1) + '亿';
+    if (abs >= 10000) return '¥' + (v / 10000).toFixed(abs >= 1000000 ? 0 : 1) + '万';
+    return '¥' + v.toLocaleString('zh-CN');
+  },
+};
+</script>
+<script>/**
+ * mock-data.js - 看板预览用的模拟数据与最小桩件（不连数据库、不发请求）
+ *
+ * 供 docs/preview/build-dashboard-preview.js 内联进自包含预览页，
+ * 目的是让「数据看板」在没有真实账号 / 数据的情况下也能完整渲染出来做视觉验收。
+ * 数据为确定性伪随机（同一种子每次一致），仅用于看版面与字号。
+ */
+
+/* —— 与真实字典同源的取值 —— */
+const PREVIEW_DEPTS = ['地调所', '地勘分院', '岩土所', '地灾所', '实验室', '禹地公司', '资环所', '测绘院太原分院', '大地测绘中心', '工程测绘中心', '遥感中心', '大数据中心', '测绘咨询中心', '晋城分院', '能源所', '地震物探', '工程物探所', '综合研究所', '广州分院', '电磁所', '碳中和', '矿产咨询', '六勘院太原分院', '一测', '二测', '综勘三', '原物探/太原', '翟悟飞', '孙勇军', '其他'];
+const PREVIEW_UNITS = ['物化院', '六勘院', '测绘院', '禹地公司'];
+const PREVIEW_ATTRS = ['内部单位', '政府部门--省', '政府部门--市', '政府部门--县', '政府部门--县以下', '煤矿集团--晋能控股', '煤矿集团--山西焦煤', '煤矿集团--潞安化工', '煤矿集团--华阳新材', '煤矿集团--华新燃气', '煤矿集团--其他煤矿', '社会客户-省内', '社会客户-省外', '社会客户-海外', '其他'];
+const PREVIEW_NATURES = ['二、三维地震', '宅基地', '农经权', '房地一体', '其他测绘', '工民建勘察', '报告编写、设计方案', '政府性灾害勘察', '地灾评估、勘察、设计', '市场地质', '价款项目', '综合物探', '基础施工', '灾害施工', '生态修复', '化验、基础检测', '土工试验', '其他'];
+const PREVIEW_SECTORS = ['能源资源勘查开发', '生态保护修复', '地质灾害治理', '工程勘察与施工', '地质延伸产业', '实验测试', '测绘地理信息', '海外勘查贸易'];
+const PREVIEW_CLIENTS = [
+  '山西晋能控股集团某煤业有限公司', '山西焦煤集团某煤矿', '潞安化工集团某煤业', '华阳新材料科技集团',
+  '某县自然资源局', '某市规划和自然资源局', '某省地质勘查院', '某县农业农村局', '某煤业有限责任公司',
+  '山西华新燃气集团', '某市住房和城乡建设局', '某县水利局', '中煤某能源有限公司', '某县交通运输局',
+  '某测绘地理信息有限公司', '某乡人民政府', '某海外矿业有限公司', '某县应急管理局',
+];
+
+/* 确定性伪随机（LCG） */
+let _seed = 20260915;
+const rnd = () => { _seed = (_seed * 1103515245 + 12345) % 2147483648; return _seed / 2147483648; };
+const pick = arr => arr[Math.floor(rnd() * arr.length)];
+const money = (min, max) => Math.round((min + rnd() * (max - min)) / 1000) * 1000;
+const pad2 = n => String(n).padStart(2, '0');
+
+const PREVIEW_DEPT_ROWS = PREVIEW_DEPTS.map((name, i) => ({ id: 'D' + String(i + 1).padStart(3, '0'), name }));
+
+/* —— 台账模拟行（约 12% 决算未定，用于覆盖「—」口径与 KPI 附注） —— */
+const LEDGER_ROWS = (() => {
+  const rows = [];
+  const statuses = ['完工', '施工中', '中止', '取消或作废'];
+  const debts = ['正常', '正常', '正常', '逾期', '逾期', '诉讼', '和解', ''];
+  for (let i = 0; i < 72; i++) {
+    const dept = PREVIEW_DEPT_ROWS[Math.floor(rnd() * PREVIEW_DEPT_ROWS.length)];
+    const hasFinal = rnd() > 0.12;
+    const contract = money(300000, 9800000);
+    const invoiced = Math.round((hasFinal ? contract : money(100000, 3000000)) * (0.25 + rnd() * 0.7));
+    const received = Math.round(invoiced * rnd() * 0.95);
+    rows.push({
+      id: 'L' + String(i + 1).padStart(4, '0'),
+      contract_no: `WT2026-${String(100 + i)}`,
+      project_name: `某${pick(['县', '市', '矿区', '乡'])}${pick(PREVIEW_NATURES)}${pick(['技术服务', '勘察', '测绘', '施工'])}项目（含野外作业与内业报告）`,
+      department_id: dept.id,
+      creditor_unit: pick(PREVIEW_UNITS),
+      owner_unit: pick(PREVIEW_CLIENTS),
+      client_attr: pick(PREVIEW_ATTRS),
+      work_nature: pick(PREVIEW_NATURES),
+      sector: pick(PREVIEW_SECTORS),
+      project_status: pick(statuses),
+      final_amount: hasFinal ? contract : null,
+      invoiced_amount: invoiced,
+      received_amount: received,
+      writeoff_amount: rnd() > 0.9 ? Math.round(received * 0.1) : 0,
+      debt_status: pick(debts),
+      dunning_date: rnd() > 0.3
+        ? `2026-${pad2(1 + Math.floor(rnd() * 9))}-${pad2(1 + Math.floor(rnd() * 28))}` : null,
+      collector: pick(['张三', '李四', '王五', '赵六', '孙勇军', '翟悟飞', '']),
+    });
+  }
+  return rows;
+})();
+
+/* —— 明细模拟（近 12 个月开票 / 回款，供趋势卡） —— */
+function mockDetail(kind) {
+  const out = [];
+  const now = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+    const cnt = 2 + ((i * 7) % 5);
+    for (let j = 0; j < cnt; j++) {
+      const amt = 200000 + ((i * 13 + j * 29) % 40) * 160000;
+      const day = pad2(Math.min(3 + j * 4, 28));
+      out.push(kind === 'invoice'
+        ? { invoice_date: `${key}-${day}`, amount: amt }
+        : { receipt_date: `${key}-${day}`, amount: Math.round(amt * 0.68) });
+    }
+  }
+  return out;
+}
+
+/* —— 最小桩件：Ledger / sb / App —— */
+const Ledger = {
+  rows: LEDGER_ROWS,
+  departments: PREVIEW_DEPT_ROWS,
+  /** 与 js/ledger.js computeRow 口径一致（决算未定 → null） */
+  computeRow(r) {
+    const inv = Number(r.invoiced_amount || 0);
+    const recv = Number(r.received_amount || 0);
+    const wo = Number(r.writeoff_amount || 0);
+    const has = r.final_amount !== null && r.final_amount !== undefined && r.final_amount !== '';
+    const fin = has ? Number(r.final_amount) : null;
+    return {
+      receivable_internal: Math.round((inv - recv) * 10000) / 10000,
+      receivable_external: fin === null ? null : Math.round((fin - inv) * 10000) / 10000,
+      receivable_balance: fin === null ? null : Math.round((fin - recv - wo) * 10000) / 10000,
+      attach_summary: '',
+    };
+  },
+  deptNameOf(r) {
+    const d = this.departments.find(x => x.id === r.department_id);
+    return d ? d.name : '未指定';
+  },
+};
+
+/** Supabase 客户端桩：loadTrend 的三段链式调用原样可用 */
+const sb = {
+  from(table) {
+    return {
+      select: () => ({
+        gte: () => Promise.resolve({
+          data: table === 'ar_invoices' ? mockDetail('invoice')
+            : table === 'ar_receipts' ? mockDetail('receipt') : [],
+          error: null,
+        }),
+      }),
+    };
+  },
+};
+
+const App = { currentView: 'dashboard' };
+
+/* —— 渲染 —— */
+document.getElementById('root').innerHTML = `
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="side-brand">企业应收账款<br>台账系统</div>
+      <nav class="side-nav">
+        ${[['◔', '数据看板', true], ['▤', '台账总览'], ['⇪', 'Excel 导入'], ['◱', '导入批次'],
+           ['☰', '用户管理'], ['⚙', '选项管理'], ['⚙', '系统设置']]
+          .map(([ic, label, on]) => `<button class="nav-item ${on ? 'active' : ''}">
+            <span class="nav-icon" aria-hidden="true">${ic}</span><span>${label}</span></button>`).join('')}
+      </nav>
+      <div class="side-perms">
+        <div class="sp-title">我的权限（7 · 全部）</div>
+        <ul class="perm-list">
+          ${['查看台账', '查看全部数据', '新增记录', '编辑记录', '删除记录', '导入 Excel', '导出 Excel']
+            .map(l => `<li class="on"><span class="pm-icon">✓</span>${l}</li>`).join('')}
+          <li class="on"><span class="pm-icon">✓</span>超级管理员（用户与设置）</li>
+        </ul>
+      </div>
+    </aside>
+    <div class="app-main">
+      <header class="topbar">
+        <div class="topbar-left"><div class="topbar-title">数据看板</div></div>
+        <div class="topbar-user">
+          <span class="user-dept">系统管理员</span><span class="user-name">sjn</span>
+          <button class="btn btn-xs">修改密码</button><button class="btn btn-xs">退出</button>
+        </div>
+      </header>
+      <main class="page-container"><section id="page-dashboard" class="page"></section></main>
+    </div>
+  </div>`;
+
+Dashboard.render();
+</script>
+</body>
+</html>

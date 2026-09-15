@@ -4,9 +4,16 @@
  * 口径：账内应收 = 开票 − 到账；账外应收 = 决算 − 开票；
  *      应收余额 = 决算 − 到账 − 核销；债权状态为手工维护（正常/逾期/诉讼/和解）
  *      决算金额未定的行：账外应收 / 应收余额不计入合计（KPI 附提示笔数）
- * 视角：部门（责任口径 TOP8）与 单位（债权主体法人口径）正交聚合（CONTEXT.md「组织」）
+ * 视角：部门（责任口径）与 单位（债权主体法人口径）正交聚合（CONTEXT.md「组织」）
  * 趋势：月度开票/回款（数据源 ar_invoices / ar_receipts 明细表，表未建时该卡静默隐藏）
- * 图表：纯 SVG 手绘，无外部依赖；配色与 css/style.css 设计令牌同源（oklch 换算的 sRGB 值）
+ *
+ * 图表：纯 SVG 手绘，无外部依赖。
+ *   ⚠ 关键：SVG 用 viewBox + width:100% 时，容器比 viewBox 宽多少，图内文字就放
+ *   大多少倍（520 宽的 viewBox 放进 1400px 卡片 → 12px 文字渲染成 32px）。
+ *   因此这里**先量容器宽度再生成 viewBox**（见 paintCharts），缩放比恒为 1，
+ *   文字尺寸即设计尺寸；同时用 max-width 封顶，避免超宽屏上条形长得失去可比性。
+ * 配色：颜色只承载语义，不承载装饰——「欠款量级」类图统一主色，
+ *   仅「客户属性大类」与「债权状态」使用分类/语义色。
  */
 
 /* —— 图表色板（对应 css/style.css :root 令牌的 sRGB 等价色）—— */
@@ -22,6 +29,9 @@ const C_OK        = '#267543';   // --ok
 const C_TEAL      = '#006a6a';   // --teal
 const C_VIOLET    = '#623e96';   // --violet
 
+/** 图表宽度上限：超过这个宽度条形过长、标签与数值距离过远，反而不好读 */
+const DASH_MAX_W = 1120;
+
 /** 客户属性大类着色（分类用色，刻意避开红/琥珀以免与风险语义混淆） */
 function groupColorOf(name) {
   if (/^内部单位/.test(name)) return C_INK_600;
@@ -33,12 +43,17 @@ function groupColorOf(name) {
 
 const Dashboard = {
 
+  /* 图表数据缓存（供窗口尺寸变化后重绘，避免重新拉数据） */
+  _ch: null,
+  _resizeBound: false,
+
   render() {
     const page = document.getElementById('page-dashboard');
     if (!page) return;
     const rows = Ledger.rows || [];
 
     if (!rows.length) {
+      this._ch = null;
       page.innerHTML = `
         <div class="dash-empty">
           <p>暂无可统计的台账数据</p>
@@ -52,6 +67,7 @@ const Dashboard = {
     const sum = (fn) => rows.reduce((s, r) => s + fn(r), 0);
     const hasFinal = r => r.final_amount !== null && r.final_amount !== undefined && r.final_amount !== '';
     const unfinalCount = rows.filter(r => !hasFinal(r)).length;
+    const finalCount = rows.length - unfinalCount;
     const totalFinal = sum(r => Number(r.final_amount || 0));
     const totalInvoiced = sum(r => Number(r.invoiced_amount || 0));
     const totalReceived = sum(r => Number(r.received_amount || 0));
@@ -134,24 +150,24 @@ const Dashboard = {
     page.innerHTML = `
       <div class="dash-kpis">
         <div class="kpi-card">
-          <div class="kpi-label">台账笔数 / 决算总额</div>
-          <div class="kpi-value">${rows.length}<span class="kpi-unit">笔</span><span class="kpi-sep">/</span>${this.wan(totalFinal)}</div>
-          <div class="kpi-sub">开票 ${this.wan(totalInvoiced)} · 到账 ${this.wan(totalReceived)} · 核销 ${this.wan(totalWriteoff)}</div>
+          <div class="kpi-label">决算总额（应收总量）</div>
+          <div class="kpi-value">${this.wan(totalFinal)}</div>
+          <div class="kpi-sub">共 ${rows.length} 笔 · 已定案 ${finalCount} 笔 · 开票 ${this.wan(totalInvoiced)}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">账内应收（开票 − 到账）</div>
           <div class="kpi-value kpi-blue">${this.wan(totalInternal)}</div>
-          <div class="kpi-sub">已开票未回款部分</div>
+          <div class="kpi-sub">已开票未回款 · 已到账 ${this.wan(totalReceived)}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">账外应收（决算 − 开票）</div>
           <div class="kpi-value">${this.wan(totalExternal)}</div>
-          <div class="kpi-sub">已决算未开票部分${unfinalCount ? ` · ${unfinalCount} 笔决算未定未计入` : ''}</div>
+          <div class="kpi-sub">已决算未开票${unfinalCount ? ` · ${unfinalCount} 笔决算未定未计入` : ''}</div>
         </div>
         <div class="kpi-card kpi-danger">
           <div class="kpi-label">应收余额（决算 − 到账 − 核销）</div>
           <div class="kpi-value">${this.wan(totalBalance)}</div>
-          <div class="kpi-sub">逾期 ${debtCounts['逾期'] || 0} 笔 · 诉讼 ${debtCounts['诉讼'] || 0} 笔${unfinalCount ? ` · 决算未定 ${unfinalCount} 笔` : ''}</div>
+          <div class="kpi-sub">已核销 ${this.wan(totalWriteoff)} · 逾期 ${debtCounts['逾期'] || 0} 笔 · 诉讼 ${debtCounts['诉讼'] || 0} 笔</div>
         </div>
       </div>
 
@@ -160,37 +176,40 @@ const Dashboard = {
           <h3>月度开票 / 回款趋势</h3>
           <span class="muted">近 12 个月 · 按明细发生额 · <span id="dash-trend-note"></span></span>
         </div>
-        <div class="dash-card-body" id="dash-trend-body"></div>
+        <div class="dash-card-body"><div data-chart="trend"></div></div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="dash-card">
+          <div class="dash-card-head">
+            <h3>各单位应收余额（债权主体）</h3>
+            <span class="muted">法人口径 · 按台账「单位」列聚合</span>
+          </div>
+          <div class="dash-card-body"><div data-chart="unit"></div></div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-head"><h3>债权状态构成</h3><span class="muted">人工维护的处置阶段</span></div>
+          <div class="dash-card-body"><div data-chart="debt"></div></div>
+        </div>
+      </div>
+
+      <div class="dash-grid even">
+        <div class="dash-card">
+          <div class="dash-card-head"><h3>各部门应收余额 TOP8</h3><span class="muted">责任口径 · 按部门归属</span></div>
+          <div class="dash-card-body"><div data-chart="dept"></div></div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-head"><h3>客户应收余额 TOP10</h3><span class="muted">催收对象排序 · 按客户名称聚合</span></div>
+          <div class="dash-card-body"><div data-chart="cust"></div></div>
+        </div>
       </div>
 
       <div class="dash-card">
         <div class="dash-card-head">
-          <h3>各单位应收余额（债权主体）</h3>
-          <span class="muted">法人口径 · 按台账「单位」列聚合</span>
+          <h3>客户属性欠款构成</h3>
+          <span class="muted">按 15 类客户属性聚合 · 四大类着色（政府部门 / 煤矿集团 / 社会客户 / 内部单位）</span>
         </div>
-        <div class="dash-card-body">${this.unitChart(unitBars)}</div>
-      </div>
-
-      <div class="dash-grid">
-        <div class="dash-card">
-          <div class="dash-card-head"><h3>客户应收余额 TOP10</h3><span class="muted">催收对象排序 · 按客户名称聚合</span></div>
-          <div class="dash-card-body">${this.custChart(custBars)}</div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-head"><h3>客户属性欠款构成</h3><span class="muted">按 15 类客户属性聚合 · 大类着色</span></div>
-          <div class="dash-card-body">${this.attrChart(attrBars)}${this.attrLegend(attrGroupTotals)}</div>
-        </div>
-      </div>
-
-      <div class="dash-grid">
-        <div class="dash-card">
-          <div class="dash-card-head"><h3>各部门应收余额 TOP8</h3></div>
-          <div class="dash-card-body">${this.deptChart(deptBars)}</div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-head"><h3>债权状态构成</h3></div>
-          <div class="dash-card-body">${this.debtChart(debtCounts, rows.length)}</div>
-        </div>
+        <div class="dash-card-body"><div data-chart="attr"></div></div>
       </div>
 
       <div class="dash-card">
@@ -227,7 +246,51 @@ const Dashboard = {
         </div>
       </div>`;
 
+    /* 图表数据入缓存 → 量宽绘制（render 时页面已可见，clientWidth 有效） */
+    this._ch = {
+      unit: unitBars, dept: deptBars, cust: custBars,
+      attr: attrBars, attrTotals: attrGroupTotals,
+      debt: { counts: debtCounts, total: rows.length },
+      trend: null,
+    };
+    this.bindResize();
+    this.paintCharts();
     this.loadTrend();
+  },
+
+  /* ---------- 按容器实测宽度绘制全部图表（缩放比恒为 1） ---------- */
+  paintCharts() {
+    const page = document.getElementById('page-dashboard');
+    const ch = this._ch;
+    if (!page || !ch) return;
+
+    const paint = (name, build) => {
+      const el = page.querySelector(`[data-chart="${name}"]`);
+      if (!el) return;
+      const w = Math.round(el.clientWidth);
+      if (!w || w < 80) return;   // 容器不可见（如趋势卡尚未展开）→ 稍后重绘
+      el.innerHTML = build(Math.min(w, DASH_MAX_W));
+    };
+
+    paint('unit', w => this.unitChart(ch.unit, w));
+    paint('debt', w => this.debtChart(ch.debt.counts, ch.debt.total, w));
+    paint('dept', w => this.deptChart(ch.dept, w));
+    paint('cust', w => this.custChart(ch.cust, w));
+    paint('attr', w => this.attrChart(ch.attr, w) + this.attrLegend(ch.attrTotals));
+    if (ch.trend) paint('trend', w => this.trendChart(ch.trend.months, ch.trend.invMap, ch.trend.recvMap, w));
+  },
+
+  /* 窗口尺寸变化 → 防抖重绘（不重新请求数据） */
+  bindResize() {
+    if (this._resizeBound) return;
+    this._resizeBound = true;
+    let timer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (typeof App !== 'undefined' && App.currentView === 'dashboard') this.paintCharts();
+      }, 160);
+    });
   },
 
   /* ---------- 月度开票/回款趋势（ar_invoices / ar_receipts 明细聚合） ---------- */
@@ -249,6 +312,9 @@ const Dashboard = {
     } catch (e) { card.remove(); return; }
     /* 明细表未建（upgrade-v3.1-receipts.sql 未执行）或查询失败 → 静默隐藏整卡 */
     if ((inv && inv.error) || (recv && recv.error)) { card.remove(); return; }
+
+    /* 页面可能已切走，缓存已重置 */
+    if (!this._ch) return;
 
     const months = [];
     const now = new Date();
@@ -272,22 +338,23 @@ const Dashboard = {
     const note = document.getElementById('dash-trend-note');
     if (note) note.textContent = `本月已开票 ${this.wan(invMap[curMonth] || 0)} · 已回款 ${this.wan(recvMap[curMonth] || 0)}`;
 
-    document.getElementById('dash-trend-body').innerHTML =
-      this.trendChart(months, invMap, recvMap);
+    this._ch.trend = { months, invMap, recvMap };
     card.style.display = '';
+    this.paintCharts();
   },
 
   /* 月度双序列分组柱状图：开票（蓝）/ 回款（绿） */
-  trendChart(months, invMap, recvMap) {
+  trendChart(months, invMap, recvMap, W = 560) {
     const vals = months.map(m => [Number(invMap[m] || 0), Number(recvMap[m] || 0)]);
     if (!vals.some(v => v[0] > 0 || v[1] > 0)) {
       return '<div class="dash-empty-sm">近 12 个月无开票 / 回款明细记录<br><span class="muted">在编辑弹窗的「开票明细 / 回款明细」区块登记后，此处自动汇总</span></div>';
     }
     const max = Math.max(...vals.flat());
-    const W = 560, H = 176, top = 26, bottom = 40;
+    const H = 196, top = 28, bottom = 42;
     const plotH = H - top - bottom;
     const groupW = W / months.length;
-    const barW = Math.min(14, groupW / 3.2);
+    /* 柱宽随容器伸缩，但设上限，避免超宽屏上柱子变成细线、柱间出现大空洞 */
+    const barW = Math.max(5, Math.min(20, groupW * 0.30));
     const y = v => top + plotH * (1 - v / max);
 
     const bars = months.map((m, i) => {
@@ -296,19 +363,23 @@ const Dashboard = {
       const x1 = cx - barW - 1, x2 = cx + 1;
       const label = Number(m.slice(5)) + '月';
       const lab = i === 0 || Number(m.slice(5)) === 1 ? String(m.slice(2, 4)) + '年' : label;
-      const t1 = iv > 0 ? `<text x="${x1 + barW / 2}" y="${y(iv) - 4}" text-anchor="middle" font-size="9" fill="${C_PRIMARY}">${this.wanShort(iv)}</text>` : '';
-      const t2 = rv > 0 ? `<text x="${x2 + barW / 2}" y="${y(rv) - 4}" text-anchor="middle" font-size="9" fill="${C_OK}">${this.wanShort(rv)}</text>` : '';
-      return `
+      const t1 = iv > 0 ? `<text x="${x1 + barW / 2}" y="${y(iv) - 5}" text-anchor="middle" font-size="9" fill="${C_PRIMARY}">${this.wanShort(iv)}</text>` : '';
+      const t2 = rv > 0 ? `<text x="${x2 + barW / 2}" y="${y(rv) - 5}" text-anchor="middle" font-size="9" fill="${C_OK}">${this.wanShort(rv)}</text>` : '';
+      /* 悬停显示精确金额（柱顶标注为短格式，避免相邻柱标签重叠） */
+      const tip = `${m.slice(0, 4)}年${Number(m.slice(5))}月 · 开票 ${Utils.fmtMoney(iv)} · 回款 ${Utils.fmtMoney(rv)}`;
+      return `<g><title>${Utils.escapeHtml(tip)}</title>
         ${t1}<rect x="${x1}" y="${y(iv)}" width="${barW}" height="${Math.max(top + plotH - y(iv), iv > 0 ? 2 : 0)}" rx="2" fill="${C_PRIMARY}"/>
         ${t2}<rect x="${x2}" y="${y(rv)}" width="${barW}" height="${Math.max(top + plotH - y(rv), rv > 0 ? 2 : 0)}" rx="2" fill="${C_OK}"/>
-        <text x="${cx}" y="${H - 18}" text-anchor="middle" font-size="10" fill="${C_INK_500}">${lab}</text>`;
+        <text x="${cx}" y="${H - 18}" text-anchor="middle" font-size="11" fill="${C_INK_500}">${lab}</text></g>`;
     }).join('');
     const axis = `<line x1="0" y1="${top + plotH}" x2="${W}" y2="${top + plotH}" stroke="${C_LINE}"/>`;
     return `
-      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${axis}${bars}</svg>
+      <svg viewBox="0 0 ${W} ${H}" role="img"
+           aria-label="近 12 个月开票与回款趋势柱状图" style="width:100%;max-width:${W}px;height:auto">${axis}${bars}</svg>
       <div class="dash-legend">
         <div class="dash-legend-item"><i style="background:${C_PRIMARY}"></i>开票</div>
         <div class="dash-legend-item"><i style="background:${C_OK}"></i>回款</div>
+        <div class="dash-legend-item muted">柱顶为万元短标注 · 悬停看精确金额</div>
       </div>`;
   },
 
@@ -321,24 +392,24 @@ const Dashboard = {
     return String(Math.round(v));
   },
 
-  /* ---------- 部门条形图 ---------- */
-  deptChart(bars) {
-    return this.barChart(bars, { color: C_PRIMARY, labelW: 92 });
+  /* ---------- 部门条形图（责任口径） ---------- */
+  deptChart(bars, W) {
+    return this.barChart(bars, { color: C_PRIMARY, labelW: 96, title: '各部门应收余额' }, W);
   },
 
   /* ---------- 单位（债权主体）条形图 ---------- */
-  unitChart(bars) {
-    return this.barChart(bars, { color: C_TEAL, labelW: 76 });
+  unitChart(bars, W) {
+    return this.barChart(bars, { color: C_PRIMARY, labelW: 84, title: '各单位应收余额' }, W);
   },
 
   /* ---------- 客户条形图（长名称，标签加宽） ---------- */
-  custChart(bars) {
-    return this.barChart(bars, { color: C_VIOLET, labelW: 128, labelMax: 12 });
+  custChart(bars, W) {
+    return this.barChart(bars, { color: C_PRIMARY, labelW: 132, labelMax: 12, title: '客户应收余额' }, W);
   },
 
   /* ---------- 客户属性条形图（按大类着色） ---------- */
-  attrChart(bars) {
-    return this.barChart(bars, { labelW: 118, labelMax: 10, colorBy: name => groupColorOf(name) });
+  attrChart(bars, W) {
+    return this.barChart(bars, { labelW: 120, labelMax: 10, colorBy: name => groupColorOf(name), title: '客户属性欠款构成' }, W);
   },
 
   /* 客户属性大类图例（含各类合计） */
@@ -351,40 +422,42 @@ const Dashboard = {
       </div>`).join('')}</div>`;
   },
 
-  /* ---------- 通用水平条形图 ---------- */
-  barChart(bars, opts = {}) {
+  /* ---------- 通用水平条形图（W = 容器实测宽度） ---------- */
+  barChart(bars, opts = {}, W = 520) {
     if (!bars.length) return '<div class="dash-empty-sm">暂无未清应收余额</div>';
-    const color = opts.color || C_PRIMARY, labelW = opts.labelW || 92;
+    const color = opts.color || C_PRIMARY, labelW = opts.labelW || 96;
     const labelMax = opts.labelMax || 7;
     const max = Math.max(...bars.map(b => b[1]));
-    const W = 520, rowH = 34, barH = 16, valueW = 72;
+    const rowH = 34, barH = 16, valueW = 80;
     const H = bars.length * rowH + 8;
-    const innerW = W - labelW - valueW;
+    const innerW = Math.max(80, W - labelW - valueW);
     const svg = bars.map(([name, val], i) => {
       const y = 8 + i * rowH;
       const w = Math.max(3, innerW * val / max);
       const barColor = opts.colorBy ? opts.colorBy(name) : color;
       const label = name.length > labelMax ? name.slice(0, labelMax) + '…' : name;
-      return `
-        <text x="${labelW - 8}" y="${y + barH / 2 + 4}" text-anchor="end" font-size="12" fill="${C_INK_600}">${Utils.escapeHtml(label)}</text>
+      return `<g><title>${Utils.escapeHtml(name)} ${this.wan(val)}</title>
+        <text x="${labelW - 10}" y="${y + barH / 2 + 4}" text-anchor="end" font-size="12" fill="${C_INK_600}">${Utils.escapeHtml(label)}</text>
         <rect x="${labelW}" y="${y}" width="${w}" height="${barH}" rx="2" fill="${barColor}"/>
-        <text x="${labelW + w + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="${C_INK_950}" font-weight="600">${this.wan(val)}</text>`;
+        <text x="${labelW + w + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="${C_INK_950}" font-weight="600">${this.wan(val)}</text></g>`;
     }).join('');
-    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${svg}</svg>`;
+    const aria = `${opts.title || '条形图'}：` + bars.map(([n, v]) => `${n} ${this.wan(v)}`).join('，');
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${Utils.escapeHtml(aria)}"
+                 style="width:100%;max-width:${W}px;height:auto">${svg}</svg>`;
   },
 
   /* ---------- 债权状态构成（水平堆叠条 + 图例） ---------- */
-  debtChart(counts, total) {
+  debtChart(counts, total, W = 520) {
     const defs = [
       ['正常', C_OK], ['逾期', C_DANGER], ['诉讼', C_VIOLET],
       ['和解', C_TEAL], ['未填写', C_INK_400],
     ].filter(([k]) => counts[k] > 0);
     if (!defs.length) return '<div class="dash-empty-sm">暂无数据</div>';
-    const W = 520, H = 96, barY = 18, barH = 28;
+    const H = 96, barY = 18, barH = 28;
     let x = 0;
     const segs = defs.map(([key, color]) => {
       const w = W * counts[key] / total;
-      const seg = `<rect x="${x}" y="${barY}" width="${Math.max(w - 1, 1)}" height="${barH}" fill="${color}"/>`;
+      const seg = `<rect x="${x}" y="${barY}" width="${Math.max(w - 1, 1)}" height="${barH}" fill="${color}"><title>${key} ${counts[key]} 笔</title></rect>`;
       x += w;
       return seg;
     }).join('');
@@ -393,8 +466,10 @@ const Dashboard = {
         <i style="background:${color}"></i>${key}
         <b>${counts[key]}</b><span>笔 · ${Math.round(counts[key] / total * 100)}%</span>
       </div>`).join('');
+    const aria = `债权状态构成：` + defs.map(([k]) => `${k} ${counts[k]} 笔`).join('，');
     return `
-      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${Utils.escapeHtml(aria)}"
+           style="width:100%;max-width:${W}px;height:auto">
         <rect x="0" y="${barY}" width="${W}" height="${barH}" rx="4" fill="${C_SURFACE_3}"/>
         ${segs}
         <text x="${W / 2}" y="${barY + barH + 22}" text-anchor="middle" font-size="12" fill="${C_INK_500}">共 ${total} 笔</text>
