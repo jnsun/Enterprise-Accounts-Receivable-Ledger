@@ -118,7 +118,14 @@ function chain(result) {
   };
   return o;
 }
-const sb = { from: () => chain({ data: [], error: null }) };
+/* ar_departments 必须真的回数据：真实环境里 Ledger.init() 就是从这张表取部门字典，
+   桩件若一律回 []，init() 会把 departments 覆盖成空 —— 「归属部门」列会全变成
+   「未指定」（真实环境同理：该表的 SELECT 若被 RLS 挡住，这一列也会全空）。 */
+const sb = {
+  from: (t) => chain(t === 'ar_departments'
+    ? { data: DEPTS.slice(), error: null }
+    : { data: [], error: null }),
+};
 
 const Auth = {
   isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1' }, perms: {},
@@ -143,7 +150,6 @@ const Batches = { load() {} };
       })));
     }
   }
-  Ledger.departments = DEPTS.slice();
   Ledger.filters.settled = '全部';
 
   if (location.hash === '#core') {
@@ -151,6 +157,8 @@ const Batches = { load() {} };
       [...FIELD_DEFS, ...COMPUTED_DEFS].map(f => f.key).filter(k => !ColPrefs.coreKeys().includes(k)));
   }
 
+  /* 部门字典由 init() 从 ar_departments 载入（走上面的桩件）—— 这里刻意不再手动赋值，
+     否则会掩盖"部门字典没取到"这类真实故障，预览就失真了 */
   await Ledger.init().catch(() => {});
   Ledger.render();
 

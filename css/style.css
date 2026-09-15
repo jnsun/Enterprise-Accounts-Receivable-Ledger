@@ -466,6 +466,8 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 .td-money.owed { color: var(--danger); font-weight: 600; }
 .td-money.neg { color: var(--danger); }
 .td-date { color: var(--ink-600); font-variant-numeric: tabular-nums; }
+/* 归属部门是「归属」类属性，不是内容主体 —— 压一档灰度，避免和项目名称/客户名称抢视线 */
+.td-dept { color: var(--ink-600); }
 .td-name { line-height: 1.45; white-space: normal; word-break: break-word; }
 /* 合计行：原本只有金额格带底纹，中间一格一格是透明的，视觉上像一条
    「断成几截的空白带」；改为整条铺满，并固定在表格底部当作实时合计条 */

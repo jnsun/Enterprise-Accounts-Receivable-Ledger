@@ -108,6 +108,21 @@ node docs/preview/build-ledger-preview.js        # 重新生成 docs/preview/led
 
 > **空状态不要塞进表格里**：台账表宽可达 3000px+，`<td colspan="23">` 里的居中内容会落在**整表**的中点（约 x=1700），落在可视区之外 —— 也就是"一片空白什么都没有"。空状态改用独立的 `.table-wrap.is-empty` + `.empty-state` 面板，在可见区域内居中。
 
+### 增删台账列要动哪几处（别只加一行定义）
+
+列定义在 `js/fields.js`，但一处定义会被**六个地方**派生消费，改之前先过一遍：
+
+| # | 位置 | 影响 |
+| --- | --- | --- |
+| ① | 表格位次 | 列序 = `[...FIELD_DEFS, ...COMPUTED_DEFS]`。**`COMPUTED_DEFS` 里的列只能排到最右**（那是金额计算列的地盘）；要控制位次就得放进 `FIELD_DEFS` |
+| ② | 取值口径 | `Ledger.computeRow()` 暴露派生值 → 表格渲染用 `f.key in comp ? comp[f.key] : r[f.key]`、排序比较器、`Exporter.valueOf()` 三处共用。**只改一处就会出现"表格和导出不一致"** |
+| ③ | 编辑表单 | `FORM_GROUPS` 里的字段会被 `renderModal()` 渲染；已独立渲染的字段（如部门下拉 `#ed-department_id`）**不要再放进 FORM_GROUPS**，否则弹窗里出现两次 |
+| ④ | Excel 导入 | `importer.js` 的 `IMPORT_TARGETS` 与 `downloadTemplate()` **都从 `FIELD_DEFS` 派生**。不该出现在导入里的字段要标 `noImport: true`，否则映射目标重复 / 模板多出一列 |
+| ⑤ | 字段级权限 | 非管理员可提交哪些字段由 `deptEditable` + `FORM_GROUPS[0]` 决定。加错会让写请求撞上数据库触发器 `ar_ledger_guard_fields`（报 `AR_FIELD_LOCKED`） |
+| ⑥ | 常用列 / 导出字段 | `ColPrefs.coreKeys()` 决定「仅常用列」「常用字段」保留哪些。**新增的重要列要加进去**，否则用户点一下就以为这一列丢了 |
+
+列定义支持的标记：`width`（列宽）/ `cls`（单元格附加 class）/ `noImport` / `deptEditable` / `dict`（选项字典类别）/ `clamp`（长文本多行截断）/ `aliases`（导入表头自动匹配）。
+
 
 ### 已运行 v3 的库升级到 v3.1（回款明细）
 

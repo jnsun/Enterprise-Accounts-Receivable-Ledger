@@ -39,9 +39,11 @@ const Ledger = {
     await Attachments.loadCounts();
   },
 
-  /** 行的虚拟计算列
+  /** 行的派生列值（表格渲染 / 排序比较 / Excel 导出共用同一口径）
    *  口径（CONTEXT.md）：决算金额为空时，账外应收 / 应收余额 = null（显示"—"，
    *  不参与看板与汇总合计）；账内应收照常计算（不依赖决算）。
+   *  注意 department_id 在这里是**部门名**而非 UUID —— r.department_id 才是原始外键，
+   *  列上要给人看名字，故本函数返回显示值（与 attach_summary 同理）。
    */
   computeRow(r) {
     const inv = Number(r.invoiced_amount || 0);
@@ -54,6 +56,7 @@ const Ledger = {
       receivable_external: fin === null ? null : Math.round((fin - inv) * 10000) / 10000,
       receivable_balance: fin === null ? null : Math.round((fin - recv - wo) * 10000) / 10000,
       attach_summary: Attachments.summaryText(r.id),
+      department_id: this.deptNameOf(r),
     };
   },
 
@@ -184,7 +187,9 @@ const Ledger = {
           const n = Attachments.count(r.id);
           return `<td title="${Utils.escapeHtml(comp.attach_summary)}" class="${n ? 'att-has' : 'muted'}">${n ? `📎 ${Utils.escapeHtml(comp.attach_summary)}` : '—'}</td>`;
         }
-        let v = r[f.key];
+        /* 派生列（归属部门）取值以 computeRow 为准 —— 与排序比较器、Exporter.valueOf
+           同一口径。若直接读 r[f.key]，department_id 会渲染成 UUID 原文。 */
+        let v = (f.key in comp) ? comp[f.key] : r[f.key];
         if (f.type === 'money') {
           const isCalc = f.key in comp;
           const val = isCalc ? comp[f.key] : v;
@@ -198,7 +203,7 @@ const Ledger = {
           const cls = TAG_COLORS[v] || 'tag-gray';
           return `<td><span class="tag ${cls}">${Utils.escapeHtml(v)}</span></td>`;
         }
-        return `<td title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(v || '')}</td>`;
+        return `<td class="${f.cls || ''}" title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(v || '')}</td>`;
       }).join('');
       const actions = `
         <td class="col-actions">

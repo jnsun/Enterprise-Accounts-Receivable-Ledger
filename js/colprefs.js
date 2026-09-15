@@ -17,9 +17,11 @@ const ColPrefs = {
   /** 全部可显示列（台账字段 + 自动计算列） */
   allDefs() { return [...FIELD_DEFS, ...COMPUTED_DEFS]; },
 
-  /** 常用列（一键精简，新指标体系核心 14 列） */
+  /** 常用列（一键精简，新指标体系核心 15 列）
+   *  含「归属部门」：它是本系统的第一数据维度（RLS 按部门隔离、筛选首行也是部门），
+   *  精简掉会让人以为"这一列丢了"。 */
   coreKeys() {
-    return ['contract_no', 'project_name', 'owner_unit', 'project_status',
+    return ['contract_no', 'project_name', 'department_id', 'owner_unit', 'project_status',
       'final_amount', 'invoiced_amount', 'received_amount', 'writeoff_amount',
       'receivable_internal', 'receivable_external', 'receivable_balance',
       'debt_status', 'collector', 'dunning_date'];

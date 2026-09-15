@@ -473,6 +473,8 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 .td-money.owed { color: var(--danger); font-weight: 600; }
 .td-money.neg { color: var(--danger); }
 .td-date { color: var(--ink-600); font-variant-numeric: tabular-nums; }
+/* 归属部门是「归属」类属性，不是内容主体 —— 压一档灰度，避免和项目名称/客户名称抢视线 */
+.td-dept { color: var(--ink-600); }
 .td-name { line-height: 1.45; white-space: normal; word-break: break-word; }
 /* 合计行：原本只有金额格带底纹，中间一格一格是透明的，视觉上像一条
    「断成几截的空白带」；改为整条铺满，并固定在表格底部当作实时合计条 */
@@ -1247,6 +1249,8 @@ body { margin: 0; padding: 18px 20px 60px; background: var(--surface-2); }
  * aliases: Excel 导入时用于自动匹配的候选表头名
  * dict: 选项字典类别（ar_dict.category，选项可由财务管理员在「选项管理」页编辑）
  * deptEditable: 实体部门（非管理员）可编辑（要求五：仅催收跟踪类字段）
+ * cls: 表格单元格附加 class（如 td-dept）
+ * noImport: 不参与导入映射与导入模板生成（该维度由导入端的专用目标承担）
  *
  * 自动计算口径（要求：账内应收 = 开票金额 − 到账金额；账外应收 = 决算金额 − 开票金额）：
  *   receivable_internal / receivable_external / receivable_balance 均为虚拟计算列，不入库。
@@ -1259,6 +1263,17 @@ const FIELD_DEFS = [
   /* ---- 基本信息 ---- */
   { key: 'contract_no',    label: '合同编号',     type: 'text',   width: 110, aliases: ['合同编号', '编号', '合同号'] },
   { key: 'project_name',   label: '项目名称',     type: 'text',   width: 200, clamp: true, aliases: ['项目名称', '项目', '工程项目'] },
+  /* 归属部门：数据库列是 department_id（UUID），列上按「部门名」展示 ——
+     值由 ledger.js computeRow 派生（deptNameOf），表格 / 排序 / 导出共用同一口径。
+     ⚠️ 三处刻意「不参与」：
+       ① 编辑表单 —— 部门下拉由 ledger.js renderModal 独立渲染（#ed-department_id，仅管理员），
+          放进 FORM_GROUPS 会重复出现
+       ② 导入映射与模板 —— 导入端已有专用的虚拟目标「部门名称（归属部门）」，
+          模板首两列也已是「序号 / 部门名称」，故标 noImport 挡掉（见 importer.js）
+       ③ 非管理员的保存载荷 —— 既非 deptEditable 也不在 FORM_GROUPS[0]，
+          editableKeys() 会自然过滤掉，数据库字段保护触发器不受影响 */
+  { key: 'department_id',  label: '归属部门',     type: 'text',   width: 110, cls: 'td-dept', noImport: true,
+    aliases: ['归属部门', '部门', '部门名称'] },
   { key: 'owner_unit',     label: '客户名称',     type: 'text',   width: 170, aliases: ['客户名称', '甲方单位', '甲方', '建设单位'], datalist: true },
   { key: 'client_attr',    label: '客户属性',     type: 'select', width: 96,  dict: 'client_attr', freeOther: true, aliases: ['客户属性'] },
   { key: 'creditor_unit',  label: '单位',         type: 'combo',  width: 130, dict: 'unit', aliases: ['单位', '债权单位', '乙方单位'] },

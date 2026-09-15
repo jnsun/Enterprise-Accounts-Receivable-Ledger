@@ -7,11 +7,13 @@
  * - 支持按「合同编号」跳过重复或覆盖更新
  */
 
-/* 可映射的导入目标：台账字段 + 虚拟「部门名称」（归属部门）+ 合同金额（旧字段，自动带入决算） */
+/* 可映射的导入目标：台账字段 + 虚拟「部门名称」（归属部门）+ 合同金额（旧字段，自动带入决算）
+   标了 noImport 的字段不在此列 —— 「归属部门」这一维度已由下面的虚拟「部门名称」目标承担，
+   否则会出现两个指向同一列的映射目标，用户无从选择。 */
 const IMPORT_TARGETS = [
   { key: 'department', label: '部门名称（归属部门）', aliases: ['部门名称', '部门', '施工部门'], virtual: true },
   { key: 'contract_amount', label: '合同金额（自动带入决算）', aliases: ['合同金额', '合同价', '合同额'] },
-  ...FIELD_DEFS.map(f => ({ key: f.key, label: f.label, aliases: f.aliases || [f.label] })),
+  ...FIELD_DEFS.filter(f => !f.noImport).map(f => ({ key: f.key, label: f.label, aliases: f.aliases || [f.label] })),
 ];
 
 const Importer = {
@@ -20,7 +22,8 @@ const Importer = {
   downloadTemplate() {
     const header = ['序号', '部门名称'];
     const sample = ['1', '物探一公司'];
-    FIELD_DEFS.forEach(f => {
+    /* noImport 字段跳过：模板首列已是「部门名称」，再加一列「归属部门」会让人以为要填两遍 */
+    FIELD_DEFS.filter(f => !f.noImport).forEach(f => {
       header.push(f.label);
       // 决算方式后补「合同金额」列（非工作量结算时自动带入决算金额，ADR-0003）
       if (f.key === 'final_method') { header.push('合同金额'); sample.push(100); }
