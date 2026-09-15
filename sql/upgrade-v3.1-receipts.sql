@@ -53,6 +53,26 @@ CREATE POLICY "ar_receipts_delete" ON public.ar_receipts
 
 GRANT SELECT, INSERT, DELETE ON public.ar_receipts TO authenticated;
 
+-- --------------------------------------------------------------------------
+-- 2. 开票明细登记权限收紧：统一仅财务管理员（与回款明细一致，2026-09-15 决策）
+--    此前 ar_invoices 允许部门账号（有 edit 权限时）登记开票；现统一为仅财务。
+--    读策略不变（可见性仍随台账行）。
+-- --------------------------------------------------------------------------
+DROP POLICY IF EXISTS "ar_invoices_insert" ON public.ar_invoices;
+CREATE POLICY "ar_invoices_insert" ON public.ar_invoices
+  FOR INSERT TO authenticated WITH CHECK (
+    public.ar_is_admin()
+    AND EXISTS (SELECT 1 FROM public.ar_ledger l WHERE l.id = ledger_id)
+  );
+
+DROP POLICY IF EXISTS "ar_invoices_update" ON public.ar_invoices;
+CREATE POLICY "ar_invoices_update" ON public.ar_invoices
+  FOR UPDATE TO authenticated USING (public.ar_is_admin());
+
+DROP POLICY IF EXISTS "ar_invoices_delete" ON public.ar_invoices;
+CREATE POLICY "ar_invoices_delete" ON public.ar_invoices
+  FOR DELETE TO authenticated USING (public.ar_is_admin());
+
 -- ============================================================================
 -- 完成。执行后前端「编辑台账」弹窗出现「回款明细」区块（需前端 ≥ v20260915a）。
 -- ============================================================================

@@ -433,8 +433,10 @@ const Editor = {
     const f = FIELD_DEFS.find(x => x.key === key);
     const r = this.row || {};
     const locked = !this.canEditField(key);
+    const hint = key === 'charge_date'
+      ? '<i style="font-style:normal;color:var(--text-3)">（自动=最近开票日期）</i>' : '';
     return `<label class="form-field ${locked ? 'ff-locked' : ''}" title="${locked ? '财务字段，仅财务管理员可修改' : ''}">
-      <span class="ff-label">${f.label}${locked ? ' 🔒' : ''}</span>${this.inputWidget(f, r[key], locked)}</label>`;
+      <span class="ff-label">${f.label}${hint}${locked ? ' 🔒' : ''}</span>${this.inputWidget(f, r[key], locked)}</label>`;
   },
 
   /* ---------- 弹窗 ---------- */
@@ -733,7 +735,26 @@ const Editor = {
       if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
       this.invoices = this.invoices.filter(i => i.id !== id);
       this.renderInvoicePane();
+      this.recalcChargeDate();
     }));
+  },
+
+  /** 「最新挂账时间」自动维护（2026-09-15 决策）：= 开票明细中最近一笔开票日期。
+   *  开票明细增删后重算；明细为空则不动（保留手填/导入的历史值）。
+   */
+  async recalcChargeDate() {
+    if (!this.row || !this.invoices.length) return;
+    const latest = this.invoices
+      .map(i => i.invoice_date)
+      .filter(Boolean)
+      .sort()
+      .pop();
+    if (!latest || latest === this.row.charge_date) return;
+    const { error } = await sb.from('ar_ledger').update({ charge_date: latest }).eq('id', this.row.id);
+    if (error) { Utils.toast('挂账时间更新失败：' + error.message, 'error'); return; }
+    this.row.charge_date = latest;
+    const input = document.querySelector('#modal-editor #ed-charge_date');
+    if (input && !input.disabled) input.value = latest;
   },
 
   async addInvoice() {
@@ -753,6 +774,7 @@ const Editor = {
     if (error) { Utils.toast('添加失败：' + error.message, 'error'); return; }
     this.invoices.unshift(data);
     this.renderInvoicePane();
+    this.recalcChargeDate();
     document.getElementById('inv-amount').value = '';
     document.getElementById('inv-remark').value = '';
     document.getElementById('inv-no').value = '';
