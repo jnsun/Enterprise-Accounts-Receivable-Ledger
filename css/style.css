@@ -1093,6 +1093,9 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   .ledger-table thead th { position: static; box-shadow: none; background: #f2f4f7; }
   .ledger-table tbody tr, .dash-table tr { break-inside: avoid; }
   .ledger-table td, .ledger-table th { border-color: #ccc; }
+  /* 用户表：纸上没有横向滚动，退回自动列宽并允许换行，避免账号/部门被省略号吃掉 */
+  .admin-table { table-layout: auto; }
+  .admin-table td.cell-ell { white-space: normal; overflow: visible; text-overflow: clip; }
   .ledger-table th.col-check, .ledger-table td.col-check,
   .ledger-table th.col-idx, .ledger-table td.col-idx { position: static; box-shadow: none; }
   .td-foot-label { position: static; box-shadow: none; }
