@@ -892,10 +892,15 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
    为什么不用「12 个胶囊排一行」：类别名长短不一（最宽「单位（债权单位）」122px），
    横排要占满 1156px，且胶囊塞不下「项数」和「是否已自定义」这两个信息 ——
    而财务最需要知道的就是「哪些类别还只是内置默认、没落过库」。
-   竖排还顺手解决了另一个问题：这个页元素极少，横排时内容只占顶部约 40%，
-   下方近半屏是空白；竖排的 12 行正好把高度用起来。 */
-#page-dict:not(.hidden) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-#page-dict .dict-panel { flex: 1; min-height: 0; }
+   竖排还有个好处：这一页元素极少，横排时内容只占顶部约 40%，下方近半屏是空白。
+
+   ⚠ 但「竖排把高度用起来」不等于「把面板撑满视口」。早期给 #page-dict 写了
+   height:100%，百分比链因此解析出确定值，.dict-panel 被撑到满屏（实测 792px）；
+   而本页内容常常只有 4~6 行选项，右栏下方就空出 506px，看着像没渲染完。
+   现在面板按内容定高，长列表交给 .dm-body 自己滚，右栏空白由底部一致性卡片收尾。
+   flex-basis 用 auto 而不是 0：父容器高是 auto，basis:0 会把面板的可算高度算成 0。 */
+#page-dict:not(.hidden) { display: flex; flex-direction: column; min-height: 0; }
+#page-dict .dict-panel { flex: 1 1 auto; min-height: 0; }
 
 .dict-panel {
   display: grid; grid-template-columns: 212px minmax(0, 1fr);
@@ -915,9 +920,13 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 }
 .dc-total { font-weight: 400; color: var(--ink-400); font-variant-numeric: tabular-nums; }
 .dc-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--s1) 0; }
+/* 行高 29px（原 33px）：这 12 行是导航而不是内容，类别名最长 4 个字，33px 偏松；
+   而且左栏高度直接决定面板高度 —— 12 行 396px 比右栏的选项表高出一大截，
+   面板被左栏顶高后，右栏下方就空出一块（实测 94px）。压紧后降到 ~42px。
+   29px 仍在可点击下限（WCAG 2.5.8：24px）之上。 */
 .dc-item {
   display: flex; align-items: center; gap: var(--s2); width: 100%;
-  padding: 7px 14px; border: none; border-left: 2px solid transparent;
+  padding: 5px 14px; border: none; border-left: 2px solid transparent;
   background: none; color: var(--ink-700);
   font-family: var(--font); font-size: var(--t-sm); line-height: 1.5; text-align: left;
   cursor: pointer;
@@ -963,7 +972,16 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   content: ""; width: 5px; height: 5px; border-radius: 50%;
   background: var(--warn); box-shadow: 0 0 0 3px oklch(52% 0.12 66 / 0.16);
 }
-.dm-body { flex: 1; min-height: 0; overflow: auto; }
+/* flex 竖排是为了让底部的一致性卡片（.dm-consist，在 .dm-body 之外）能贴住底缘；
+   max-height 保证选项多时在卡片内部滚 —— 表头的 sticky 靠的正是这个滚动容器。
+   380px ≈ 顶栏 + 页头 + 面板头 + 一致性卡片 + 底部按钮区的合计高度，
+   留够这些之后面板才不会顶出视口（实测 15 行时右栏正好用满且页面无第二条滚动条）。 */
+.dm-body {
+  flex: 1; min-height: 0; overflow: auto;
+  display: flex; flex-direction: column;
+  max-height: max(240px, calc(100vh - 380px));
+}
+.dict-table { flex-shrink: 0; }
 
 /* — 选项表 — */
 .dict-table {
@@ -988,6 +1006,18 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 .dict-table thead .dt-idx, .dict-table thead .dt-act { text-align: right; }
 .dict-table .dt-act { width: 118px; padding: 4px 10px; }
 .dict-table .dt-val { padding: 0; }
+/* 「在用」列：本选项被多少条台账（或附件）引用。
+   0 用一条空槽加灰「—」表示 —— 空槽本身就是「从未使用」的信号。
+   细条按本类别最高用量归一，只用于读数量级，不是精确图表。 */
+.dict-table .dt-use { width: 132px; padding: 8px 10px; }
+.du-cell { display: flex; align-items: center; gap: 8px; }
+.du-meter { flex: 1; min-width: 24px; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.du-meter > i { display: block; height: 100%; border-radius: 2px; background: var(--primary); }
+.du-n {
+  flex-shrink: 0; width: 34px; text-align: right;
+  font-size: var(--t-xs); color: var(--ink-600); font-variant-numeric: tabular-nums;
+}
+.du-n.is-zero { color: var(--ink-300); }
 /* 输入框默认"隐形"——看起来就是一行文本（像账簿里的条目）。
    4 行 4 个 32px 描边输入框堆在一起是"一堆表单框"，噪音远大于信息；
    hover 只为提示"这里能打字"，不改变行本身的观感。
@@ -1016,6 +1046,53 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   font-size: 14px; color: var(--ink-400);
   border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface-2);
 }
+
+/* — 底部：与台账数据的一致性 区（数据里在用、选项表里没有的值）—
+   这一块同时解决两件事：把「孤儿值」摆到财务眼前，以及让右栏下缘不再是空白。
+   margin-top:auto 把它压到右栏底缘，选项只有 4~6 行时也不会飘在中间。 */
+.dm-consist {
+  margin-top: auto;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 10px 16px 12px;
+}
+.du-head { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; margin-bottom: 7px; }
+.du-head b { font-size: var(--t-xs); font-weight: 600; color: var(--ink-600); letter-spacing: 0.04em; }
+.du-scope {
+  font-size: 11px; color: var(--ink-400);
+  padding: 0 6px; border-radius: 999px; border: 1px dashed var(--line-2);
+}
+.du-sum { margin-left: auto; font-size: var(--t-xs); color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.du-note { margin: 0; font-size: var(--t-xs); line-height: 1.8; color: var(--ink-500); }
+.du-ok { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--t-xs); color: var(--ok); }
+.du-ok::before { content: "✓"; font-weight: 700; }
+.du-alert {
+  margin-bottom: var(--s2); padding: 6px 10px;
+  font-size: var(--t-xs); line-height: 1.75;
+  color: oklch(42% 0.10 66); background: var(--warn-soft);
+  border: 1px solid var(--warn-line); border-radius: var(--r2);
+}
+.du-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 168px; overflow-y: auto;
+}
+.du-row {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: 4px 6px 4px 10px; border-radius: var(--r1);
+  background: var(--surface); border: 1px solid var(--line);
+  font-size: var(--t-xs);
+}
+.du-row.is-opt { border-color: var(--warn-line); background: var(--warn-soft); }
+.du-val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-700); }
+.du-src {
+  flex-shrink: 0; padding: 0 6px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-500);
+}
+.du-row.is-opt .du-src { border-color: var(--warn-line); background: transparent; color: var(--warn); }
+.du-cnt { flex-shrink: 0; color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.du-row .btn { flex-shrink: 0; }
+.du-tip { margin: var(--s2) 0 0; font-size: 11px; line-height: 1.75; color: var(--ink-400); }
 
 /* 操作按钮：旧版是 12×14px 的裸文本链接，三个紧挨着 —— 远低于 24×24 的可点击下限，
    而且「上移」和「删除」只差十几像素，误点后一保存就真的删掉了。
@@ -1529,7 +1606,11 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   .dict-cats { background: transparent; border-right: none; border-bottom: 1px solid #ccc; }
   .dc-list { overflow: visible; }
   .dict-main { display: block; }
-  .dm-body { overflow: visible; }
+  /* 纸面上不滚动：max-height / flex 都得撤掉，否则选项多的类别会被截断 */
+  .dm-body { overflow: visible; max-height: none !important; display: block !important; }
+  .dm-consist { margin-top: 0 !important; background: transparent; }
+  .du-list { max-height: none; overflow: visible; }
+  .dict-table { flex-shrink: initial; }
   .dict-table .dt-act, .dm-foot { display: none !important; }
   .dict-item { border: none; padding: 0; }
   a { color: inherit; text-decoration: none; }
@@ -1556,18 +1637,22 @@ body { margin: 0; padding: 0; background: var(--surface-2); }
 }
 .preview-note b { font-weight: 600; }
 .preview-note code { background: oklch(93% 0.02 258); padding: 1px 4px; border-radius: 3px; }
-/* 与外层真实骨架一致：固定高度而非 100vh（无头截图下视口高不稳定） */
-.preview-shell { height: 900px; min-height: 0; overflow: hidden; }
-.preview-shell .sidebar { height: 100%; }
-.preview-shell .page-container { height: 100%; min-height: 0; }
+/* 与外层真实骨架逐字一致：一句覆写都不加。
+   早期这里写死 .preview-shell{height:900px} + .page-container{height:100%}，
+   实测证明那不是「预览独有的失真」—— 真实骨架的 .app-shell{min-height:100vh}
+   同样让百分比链解析出了确定值，面板一样被撑到 792px。
+   写死高度只会掩盖真实问题，骨架类预览页一律不覆写外壳高度。 */
+.preview-shell { overflow-x: hidden; }
 </style>
 </head>
 <body>
 <div class="preview-note">
   <b>选项管理页视觉预览</b> · 模拟字典数据，不连数据库 ·
   与真实系统同源：<code>css/style.css</code> + <code>js/dictadmin.js</code> ·
-  <code>#managed</code> 已入库类别 · <code>#many</code> 18 项长列表 ·
-  <code>#dirty</code> 未保存状态 · <code>#confirm</code> 删除确认 · <code>#measure</code> 打印几何测量
+  <code>#managed</code> 已入库+有孤儿值 · <code>#renamed</code> 改名后的警示 ·
+  <code>#saveimpact</code> 保存前影响面确认 · <code>#many</code> 18 项长列表 ·
+  <code>#attach</code> 附件类别 · <code>#confirm</code> 删除确认 ·
+  <code>#measure</code> 打印几何测量
 </div>
 <div class="app-shell preview-shell">
   <aside class="sidebar">
@@ -2017,6 +2102,17 @@ const Utils = {
  *
  * 版面：双栏面板 —— 左栏类别索引（类别名 + 项数 + 是否已自定义），
  *       右栏当前类别的选项编辑区。样式见 css/style.css「选项管理」段。
+ *
+ * ── 与台账数据的一致性（「在用」列与孤儿值）──────────────────────────────
+ * 选项表不是孤岛：删掉一个还在被台账引用的选项，那些记录里的值不会跟着变，
+ * 只会变成「数据里有、选项表里没有」的孤儿值 —— 从此筛不出来、编辑时也选不回。
+ * 所以这里反查台账，把三件事摆到台面上：
+ *   ① 「在用」列：每个选项当前被多少条记录引用（0 = 从未使用）
+ *   ② 底部一致性卡片：数据里在用、选项表里没有的值，可一键「加入选项」
+ *   ③ 删除 / 保存**之前**确认影响面，而不是保存完才发现筛不出来了
+ * 读不到台账（无权限、断网、表不存在）时一律降级为「不显示使用情况」，不影响编辑与保存。
+ * 条数是全量口径：本页只对管理员开放（Auth.isAdmin），而 ar_ledger 的 RLS 里
+ * ar_is_admin() 成立即 ar_can_see_row() 恒真，所以管理员看到的就是全部部门的记录。
  */
 
 const DictAdmin = {
@@ -2024,6 +2120,11 @@ const DictAdmin = {
   current: null,   // 当前类别 key
   items: [],       // 当前类别的选项值（有序）
   dirty: false,
+
+  usage: null,     // Map<值, 引用条数>；null = 读不到台账（降级：不显示使用情况）
+  usageMax: 0,     // 上者中的最大条数（细条的归一基准；缓存起来避免每次渲染都遍历 Map）
+  loadedVals: [],  // 本次打开时数据库里的值（用于分辨「原本是选项」vs「数据里冒出来的新值」）
+  usageSrc: null,  // 当前类别的数据来源 {table, col, unit}
 
   async load(catKey) {
     const page = document.getElementById('page-dict');
@@ -2041,9 +2142,68 @@ const DictAdmin = {
       .select('value').eq('category', this.current).order('sort_order');
     if (error) { Utils.toast('选项加载失败：' + error.message, 'error'); return; }
     this.items = (data || []).map(d => d.value);
+    this.loadedVals = [...this.items];     // 快照：用于分辨「原本是选项」与「数据里冒出来的值」
     if (!this.items.length) this.items = [...Dicts.get(this.current)];
     this.dirty = false;
+    await this.loadUsage();                // 反查台账引用情况（读不到则为 null，界面自动降级）
     this.render();
+  },
+
+  /* ================= 与台账数据的一致性 ================= */
+
+  /** 类别 → 它在业务数据里的落点。多数类别是 ar_ledger 上的一列，字段名由 FIELD_DEFS 的
+   *  dict 反查（不在这里再抄一份映射，否则加字段时两处要同时改）；
+   *  附件类别落在 ar_attachments.category，不是台账字段，单独列出。 */
+  sourceOf(cat) {
+    if (cat === 'attach_category') {
+      return { table: 'ar_attachments', col: 'category', unit: '份附件', where: '附件的「类别」' };
+    }
+    const f = FIELD_DEFS.find(x => x.dict === cat);
+    if (!f) return null;
+    return { table: 'ar_ledger', col: f.key, unit: '条台账', where: `台账的「${f.label}」列` };
+  },
+
+  /** 统计每个选项被多少条记录引用。
+   *  读不到（无权限 / 断网 / 表不存在）就置 null —— 界面据此整体隐藏使用情况，
+   *  而不是显示一片「0 条」把财务吓一跳。 */
+  async loadUsage() {
+    this.usage = null;
+    this.usageMax = 0;
+    this.usageSrc = this.sourceOf(this.current);
+    if (!this.usageSrc) return;
+    try {
+      const { data, error } = await sb.from(this.usageSrc.table)
+        .select(this.usageSrc.col).limit(20000);
+      if (error) throw error;
+      const m = new Map();
+      (data || []).forEach(r => {
+        const raw = r[this.usageSrc.col];
+        const v = (raw === null || raw === undefined) ? '' : String(raw).trim();
+        if (v) m.set(v, (m.get(v) || 0) + 1);
+      });
+      this.usage = m;
+      let max = 0;
+      m.forEach(n => { if (n > max) max = n; });
+      this.usageMax = max;
+    } catch (e) { /* 静默降级：没有使用情况也不影响编辑与保存 */ }
+  },
+
+  usageOf(v) {
+    if (!this.usage) return null;
+    return this.usage.get(String(v).trim()) || 0;
+  },
+
+  /** 数据里在用、选项表里没有的值。
+   *  wasOption=true 表示它本来是选项、被删掉或改名了 —— 保存后会变成孤儿值，优先提醒；
+   *  false 表示它是从台账里直接写进去的（combo 字段 / 「其他」自由填写），可一键收编。 */
+  outsideValues() {
+    if (!this.usage) return [];
+    const now = new Set(this.items.map(v => String(v).trim()).filter(Boolean));
+    const wasOption = new Set(this.loadedVals);
+    return [...this.usage.entries()]
+      .filter(([v]) => !now.has(v))
+      .map(([v, n]) => ({ value: v, n, wasOption: wasOption.has(v) }))
+      .sort((a, b) => (b.wasOption - a.wasOption) || (b.n - a.n) || a.value.localeCompare(b.value, 'zh'));
   },
 
   /* ================= 渲染 ================= */
@@ -2061,20 +2221,35 @@ const DictAdmin = {
       </button>`;
   },
 
+  /** 「在用」单元格：数字 + 一条按最高用量归一的细条（读数量级用，不是精确图表）。
+   *  0 用一条空槽表示 —— 空槽本身就是「从未使用」的视觉信号，不必再写字。 */
+  usageCell(v) {
+    if (!this.usage) return '';
+    const n = this.usageOf(v);
+    const pct = n ? Math.max(4, Math.round(n / Math.max(1, this.usageMax) * 100)) : 0;
+    const tip = n ? `当前有 ${n} ${this.usageSrc.unit}使用这个值`
+                  : '当前没有记录使用这个值（可以安全删除）';
+    return `<span class="du-cell" title="${tip}">
+        <span class="du-meter${n ? '' : ' is-zero'}" aria-hidden="true"><i style="width:${pct}%"></i></span>
+        <span class="du-n${n ? '' : ' is-zero'}">${n || '—'}</span>
+      </span>`;
+  },
+
   rows() {
     if (!this.items.length) {
-      return `<tr><td colspan="3" class="dict-empty">
+      return `<tr><td colspan="${this.usage ? 4 : 3}" class="dict-empty">
           <b>这一类还没有选项</b>
           <span>表单下拉会回退为内置默认值，用下方输入框添加第一条</span>
         </td></tr>`;
     }
     return this.items.map((v, i) => `
-      <tr data-idx="${i}">
+      <tr data-idx="${i}" data-orig="${Utils.escapeHtml(v)}">
         <td class="dt-idx">${i + 1}</td>
         <td class="dt-val">
           <input class="dict-item" data-idx="${i}" value="${Utils.escapeHtml(v)}"
                  aria-label="第 ${i + 1} 项选项内容">
         </td>
+        ${this.usage ? `<td class="dt-use">${this.usageCell(v)}</td>` : ''}
         <td class="dt-act">
           <div class="dt-acts">
             <button type="button" class="iconbtn" data-act="up" data-idx="${i}"
@@ -2086,6 +2261,54 @@ const DictAdmin = {
           </div>
         </td>
       </tr>`).join('');
+  },
+
+  /** 底部一致性卡片：数据里在用、选项表里没有的值。
+   *  没有任何问题时也要占位（给一句确认），否则右栏下方会空出一大块。 */
+  consistHTML() {
+    const last = this.items.length ? this.items[this.items.length - 1] : '';
+    void last;
+    if (!this.usageSrc) return '';
+    if (this.usage === null) {
+      return `
+        <div class="dm-consist">
+          <div class="du-head"><b>与台账数据的一致性</b></div>
+          <p class="du-note">暂时读不到台账数据（权限或网络原因），无法核对「选项」与「实际数据」。
+            这不影响编辑与保存。</p>
+        </div>`;
+    }
+    const rows = this.outsideValues();
+    const total = [...this.usage.values()].reduce((a, b) => a + b, 0);
+    const used = this.items.filter(v => this.usageOf(v) > 0).length;
+    const lost = rows.filter(o => o.wasOption);
+    const lostN = lost.reduce((s, o) => s + o.n, 0);
+
+    const list = rows.map((o, i) => `
+      <li class="du-row ${o.wasOption ? 'is-opt' : ''}">
+        <span class="du-val" title="${Utils.escapeHtml(o.value)}">${Utils.escapeHtml(o.value)}</span>
+        <span class="du-src">${o.wasOption ? '原是选项' : '来自台账'}</span>
+        <span class="du-cnt">${o.n} ${this.usageSrc.unit}</span>
+        <button type="button" class="btn btn-xs" data-act="adopt" data-or="${i}">加入选项</button>
+      </li>`).join('');
+
+    return `
+      <div class="dm-consist">
+        <div class="du-head">
+          <b>与台账数据的一致性</b>
+          <span class="du-scope">作用于 ${this.usageSrc.where}</span>
+          <span class="du-sum">本类别 ${this.items.length} 项 · ${used} 项在用 ·
+            ${total} ${this.usageSrc.unit}${rows.length ? ' · 选项外 ' + rows.length + ' 个值' : ''}</span>
+        </div>
+        ${lost.length ? `<div class="du-alert">保存后这 ${lost.length} 个选项将从选项表移除，
+          而它们仍被 ${lostN} ${this.usageSrc.unit}引用 —— 那些记录会变成孤儿值（值还在，
+          但下拉里选不到、筛不出来）。</div>` : ''}
+        ${rows.length
+          ? `<ul class="du-list">${list}</ul>`
+          : `<p class="du-ok">数据里的值都在上面的选项表中 ✓</p>`}
+        ${used ? `<p class="du-tip">删除一个正在被使用的选项不会改动台账里的值，
+          但那条记录会变成孤儿值：筛选里查不到、编辑时也选不回来。
+          所以删除前与保存前都会先报出影响多少条。</p>` : ''}
+      </div>`;
   },
 
   render() {
@@ -2125,11 +2348,13 @@ const DictAdmin = {
               <thead><tr>
                 <th class="dt-idx">#</th>
                 <th class="dt-val">选项内容</th>
+                ${this.usage ? '<th class="dt-use">在用</th>' : ''}
                 <th class="dt-act">操作</th>
               </tr></thead>
               <tbody>${this.rows()}</tbody>
             </table>
           </div>
+          ${this.consistHTML()}
           <footer class="dm-foot">
             <div class="dm-add">
               <input class="ipt" id="dict-new" placeholder="新增选项内容…" aria-label="新增选项内容">
@@ -2163,11 +2388,12 @@ const DictAdmin = {
       await this.load(key);
     }));
 
-    // 就地编辑：不整体重渲染（会丢焦点），只同步头部与保存按钮
+    // 就地编辑：不整体重渲染（会丢焦点），只同步头部、保存按钮与使用情况
     page.querySelectorAll('.dict-item').forEach(inp => inp.addEventListener('input', () => {
       this.items[Number(inp.dataset.idx)] = inp.value;
       this.dirty = true;
       this.syncHead();
+      this.syncUsage();
     }));
 
     // 新增：回车即添加，省一次鼠标移动
@@ -2179,6 +2405,24 @@ const DictAdmin = {
 
     page.querySelector('[data-act="save"]').addEventListener('click', () => this.save());
     this.bindRowActs();
+    this.bindAdopt();
+  },
+
+  /** 一致性卡片里的「加入选项」（卡片会被 syncUsage 替换，故每次都要重新挂） */
+  bindAdopt() {
+    const page = document.getElementById('page-dict');
+    if (!page) return;
+    page.querySelectorAll('[data-act="adopt"]').forEach(b =>
+      b.addEventListener('click', () => this.adopt(Number(b.dataset.or))));
+  },
+
+  adopt(i) {
+    const o = this.outsideValues()[i];
+    if (!o || this.items.includes(o.value)) return;
+    this.items.push(o.value);
+    this.dirty = true;
+    this.render();
+    Utils.toast(`已把「${o.value}」加入选项表，点「保存修改」后正式生效`, 'info');
   },
 
   bindRowActs() {
@@ -2203,12 +2447,22 @@ const DictAdmin = {
     }));
 
     /* 删除要二次确认：文字按钮只有 11×15px 且紧贴上移/下移，误点后若再点保存
-       就真的从数据库删掉了 —— 这条路必须有个刹车。 */
+       就真的从数据库删掉了 —— 这条路必须有个刹车。
+       确认框还要报出**影响面**：这个值当前被多少条记录引用。0 条时明说「可以安全删除」，
+       否则财务每次都要停下来自己猜「删了会不会把台账搞乱」。 */
     page.querySelectorAll('[data-act="del"]').forEach(a => a.addEventListener('click', async () => {
       const i = Number(a.dataset.idx);
       const v = this.items[i];
-      const ok = await Utils.confirm(`确定删除选项「${v}」？\n保存后将从数据库中移除。`,
-        { title: '删除选项', danger: true, confirmText: '删除' });
+      const n = this.usageOf(v);
+      const unit = this.usageSrc ? this.usageSrc.unit : '';
+      const msg = n === null
+        ? `确定删除选项「${v}」？\n保存后将从数据库中移除。`
+        : n > 0
+          ? `确定删除选项「${v}」？\n\n当前有 ${n} ${unit}在使用这个值。`
+            + `删除后这些记录里的值不会被改动，但会变成「数据里有、选项表里没有」的孤儿值`
+            + ` —— 下拉里选不回来，筛选也筛不到。\n\n保存后将从数据库中移除。`
+          : `确定删除选项「${v}」？\n\n当前没有记录在使用这个值，可以安全删除。\n保存后将从数据库中移除。`;
+      const ok = await Utils.confirm(msg, { title: '删除选项', danger: true, confirmText: '删除' });
       if (!ok) return;
       this.items.splice(i, 1);
       this.dirty = true;
@@ -2241,6 +2495,24 @@ const DictAdmin = {
       btn.disabled = !can;
       btn.classList.toggle('btn-primary', can);
       btn.textContent = managed ? '保存修改' : '保存并启用';
+    }
+  },
+
+  /** 就地改名后同步「在用」列与一致性卡片 —— 改名会让原值当场变成孤儿值，
+   *  数字必须跟着变，否则财务看不到自己刚刚制造的问题。 */
+  syncUsage() {
+    if (!this.usage) return;
+    const main = document.getElementById('dict-main');
+    if (!main) return;
+    main.querySelectorAll('.dict-table tbody tr').forEach(tr => {
+      const cell = tr.querySelector('.dt-use');
+      const inp = tr.querySelector('.dict-item');
+      if (cell && inp) cell.innerHTML = this.usageCell(inp.value);
+    });
+    const box = main.querySelector('.dm-consist');
+    if (box) {
+      box.outerHTML = this.consistHTML();   // 替换会带走卡片内的事件，故紧跟着重新挂
+      this.bindAdopt();
     }
   },
 
@@ -2299,6 +2571,24 @@ const DictAdmin = {
       return;
     }
 
+    /* 影响面确认：这一步比「删除时逐个确认」重要得多 —— 删除只影响一项，
+       而保存会一次性把整类重写，改名/删除攒在同一批里发生时，财务很难自己算清
+       到底会甩下多少条孤儿记录。所以保存前把总数摆出来。 */
+    if (this.usage) {
+      const lost = this.outsideValues().filter(o => o.wasOption && o.n > 0);
+      if (lost.length) {
+        const total = lost.reduce((s, o) => s + o.n, 0);
+        const names = lost.slice(0, 5).map(o => `「${o.value}」${o.n}`).join('、');
+        const ok = await Utils.confirm(
+          `本次保存将移除 ${lost.length} 个仍在使用中的选项，共影响 ${total} ${this.usageSrc.unit}：\n\n`
+          + names + (lost.length > 5 ? ` 等 ${lost.length} 个` : '')
+          + `\n\n这些记录里的值不会被改动，但会变成「数据里有、选项表里没有」的孤儿值，`
+          + `之后下拉里选不回来。建议先在上方把它们改掉，或点「加入选项」保留。`,
+          { title: '移除在用选项', danger: true, confirmText: '仍然保存' });
+        if (!ok) { restoreBtn(); return; }
+      }
+    }
+
     if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
 
     // ① 回滚快照
@@ -2327,6 +2617,7 @@ const DictAdmin = {
     }
 
     this.dirty = false;
+    this.loadedVals = [...clean];   // 保存成功后，这批才算「原本就是选项」
     await Dicts.load();     // 刷新全局字典缓存
     Utils.toast('选项已保存，全系统即时生效', 'success');
     this.render();
@@ -2348,6 +2639,49 @@ const DB_DICT = {
   comm_method: ['电话', '上门拜访', '邮件', '微信', '函件+电话', '函件+微信'],
 };
 
+/* 台账 / 附件侧的值分布 —— 「在用」列与孤儿值的 mock 数据源。
+   刻意让 client_attr 里出现一个不在 DB_DICT 里的值（煤矿集团--晋城）：
+   那就是「数据里有、选项表里没有」的孤儿值，本页要能把它摆出来。
+   每列按 count 展开后从第 0 行开始顺序填，各列覆盖行数不同（高行会留空）——
+   这样每个值的条数就等于 count 本身，断言可以逐一对账。 */
+const DICT_COUNTS = {
+  project_status: { '完工': 4, '施工中': 6, '中止': 2, '取消或作废': 1 },
+  final_method:   { '合同金额': 8, '工作量': 5 },
+  debt_status:    { '正常': 5, '逾期': 6, '诉讼': 2, '和解': 2 },
+  client_attr:    { '内部单位': 3, '政府部门--县': 2, '煤矿集团--晋能控股': 4,
+                    '煤矿集团--潞安化工': 2, '社会客户-省内': 3, '其他': 1,
+                    '煤矿集团--晋城': 2 },              /* ← 不在 DB_DICT 里：孤儿值 */
+  comm_method:    { '电话': 4, '上门拜访': 3, '邮件': 2, '微信': 3, '函件+电话': 1 },
+  feedback:       { '承认欠款，但资金紧张': 3, '拒接电话': 2, '对质量提出异议': 2, '承认欠款，要求分期': 2 },
+  progress_note:  { '已发送第二次催款函': 3, '停工': 2, '需协商': 2, '已安排对账': 2 },
+  next_plan:      { '升级催收手段': 3, '需实地调查': 2, '跟踪付款进度': 2, '提供分期计划': 2 },
+  unit:           { '物化院': 5, '六勘院': 3, '测绘院': 2, '禹地公司': 1 },
+  work_nature:    { '二、三维地震': 3, '宅基地': 2, '农经权': 2, '房地一体': 2, '其他测绘': 1,
+                    '工民建勘察': 2, '报告编写、设计方案': 1, '地灾评估、勘察、设计': 2, '市场地质': 1,
+                    '价款项目': 1, '综合物探': 2, '基础施工': 1, '灾害施工': 1, '生态修复': 1,
+                    '化验、基础检测': 1, '土工试验': 1, '其他': 1 },
+  sector:         { '能源资源勘查开发': 3, '生态保护修复': 2, '地质灾害治理': 2, '工程勘察与施工': 2,
+                    '地质延伸产业': 2, '实验测试': 2, '测绘地理信息': 2, '海外勘查贸易': 1 },
+};
+const ATTACH_COUNTS = { '决算': 5, '中止证明': 2, '其他': 1 };
+
+const expand = counts => {
+  const out = [];
+  Object.keys(counts).forEach(v => { for (let i = 0; i < counts[v]; i++) out.push(v); });
+  return out;
+};
+/* 类别 → 台账列名，与产品同源（FIELD_DEFS 的 dict 反查），不在这里另抄一份映射 */
+const MOCK_ROWS = [];
+Object.keys(DICT_COUNTS).forEach(c => {
+  const f = FIELD_DEFS.find(x => x.dict === c);
+  if (!f) return;
+  expand(DICT_COUNTS[c]).forEach((v, i) => {
+    MOCK_ROWS[i] = MOCK_ROWS[i] || {};
+    MOCK_ROWS[i][f.key] = v;
+  });
+});
+const MOCK_ATTACH = expand(ATTACH_COUNTS).map((v, i) => ({ id: i + 1, category: v }));
+
 /* 最小可用的 PostgREST 链式替身：支持 select/eq/order/limit 与 delete/insert */
 function makeChain(table) {
   let cat = null, op = 'select', payload = null;
@@ -2358,6 +2692,9 @@ function makeChain(table) {
     eq: (k, v) => { if (k === 'category') cat = v; return o; },
     then: (res, rej) => {
       if (op === 'select') {
+        /* 台账 / 附件：只用来算「在用」条数与找孤儿值，判据在调用方，这里原样返回整行 */
+        if (table === 'ar_ledger') return Promise.resolve({ data: MOCK_ROWS, error: null }).then(res, rej);
+        if (table === 'ar_attachments') return Promise.resolve({ data: MOCK_ATTACH, error: null }).then(res, rej);
         if (cat === null) {   /* Dicts.load()：不带 eq，取全部类别 */
           const all = [];
           Object.keys(DB_DICT).forEach(c => DB_DICT[c].forEach((v, i) => all.push({ category: c, value: v, sort_order: i + 1 })));
@@ -2380,30 +2717,68 @@ const Auth = { isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1', name:
 (async () => {
   await Dicts.load();
   const h = location.hash;
-  /* #dirty 特意选一个「已入库」的类别 —— 那是真实里最常改的场景，
-     要验的是「已自定义 + 有未保存修改 → 按钮变『保存修改』」这条路径 */
-  const catFor = { '#managed': 'client_attr', '#many': 'work_nature', '#dirty': 'debt_status' };
-  await DictAdmin.load(catFor[h] || 'project_status');
+  const has = t => h.indexOf(t) >= 0;
+  /* 场景与类别解耦：类别由 hash 里的关键词挑，测量用哪个类别就写哪个关键词。
+     #measure 跑在 client_attr（有孤儿值）上；#measure-clean 跑在默认的 project_status
+     （4 项）上 —— 后者才是「右栏留白」最初被投诉的那个场景。 */
+  const pick = () => {
+    if (['#managed', '#orphan', '#renamed', '#saveimpact', '#confirm'].indexOf(h) >= 0) return 'client_attr';
+    if (has('many')) return 'work_nature';
+    if (has('attach')) return 'attach_category';
+    if (has('dirty')) return 'debt_status';
+    if (has('measure-clean')) return 'project_status';
+    if (has('measure')) return 'client_attr';
+    return 'project_status';
+  };
+  await DictAdmin.load(pick());
+  const doMeasure = has('measure');
 
-  if (h === '#dirty') {
+  if (has('dirty')) {
     const inp = document.querySelector('.dict-item');
     inp.value = inp.value + '·改';
     inp.dispatchEvent(new Event('input'));
   }
 
-  if (h === '#confirm') {
+  /* 改名首项「内部单位」（3 条在用）—— 原值当场变成孤儿值，
+     一致性卡片应立刻出现警示并在列表里列出这个值 */
+  if (has('renamed') || has('saveimpact')) {
+    const inp = document.querySelector('.dict-item');
+    inp.value = '内部单位·改';
+    inp.dispatchEvent(new Event('input'));
+  }
+
+  if (has('confirm')) {
     document.querySelector('.dict-table tbody [data-act="del"]').click();
   }
 
-  if (h === '#measure') {
+  /* 保存前的影响面确认：只把「内部单位」改名后点保存，
+     应当先弹出「将移除 1 个仍在使用的选项，共影响 3 条台账」的确认框 */
+  if (has('saveimpact')) {
+    document.querySelector('#page-dict [data-act="save"]').click();
+  }
+
+  if (doMeasure) {
     const box = e => { const r = e.getBoundingClientRect(); return 'L' + Math.round(r.left) + ' x' + Math.round(r.top) + ' w' + Math.round(r.width) + ' h' + Math.round(r.height); };
     const out = [];
     const q = s => document.querySelector(s);
     const qa = s => [...document.querySelectorAll(s)];
 
     out.push('面板: ' + box(q('.dict-panel')) + '  左栏: ' + box(q('.dict-cats')) + '  右栏: ' + box(q('.dict-main')));
-    out.push('视口高=' + window.innerHeight + '  面板底缘 y=' + Math.round(q('.dict-panel').getBoundingClientRect().bottom)
-      + '（应≈视口高−容器底部内边距，即不再留半屏空白）');
+    out.push('视口高=' + window.innerHeight + '  面板高=' + Math.round(q('.dict-panel').getBoundingClientRect().height)
+      + '  面板底缘 y=' + Math.round(q('.dict-panel').getBoundingClientRect().bottom)
+      + '  选项行数=' + qa('.dict-table tbody tr').length);
+    /* 右栏空白：表格底缘到一致性卡片顶缘的距离 —— 这就是「选项管理右栏留白」的量化口径。
+       不量「.dm-body 底缘 − 末块底缘」：卡片用 margin-top:auto 贴底，那个差值恒为 0，
+       会把中间的空白完全掩盖掉。 */
+    const consist0 = q('.dm-consist');
+    const gapOf = () => {
+      const tb = q('.dict-table');
+      if (!tb) return 0;
+      const bottom = tb.getBoundingClientRect().bottom;
+      const next = consist0 ? consist0.getBoundingClientRect().top : q('.dm-body').getBoundingClientRect().bottom;
+      return Math.round(next - bottom);
+    };
+    out.push('右栏空白=' + gapOf() + 'px（表格底缘 → 卡片顶缘；越大越像没做完）');
     out.push('body 高=' + Math.round(document.body.getBoundingClientRect().height) + '（应≈外壳高度，不该出现第二条滚动条）');
 
     const rows = qa('.dict-table tbody tr');
@@ -2452,6 +2827,34 @@ const Auth = { isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1', name:
     out.push('保存按钮: ' + box(sb) + '  disabled=' + sb.disabled + '  文案=' + sb.textContent.trim());
     out.push('左右栏分界 x=' + Math.round(q('.dict-cats').getBoundingClientRect().right) + ' = 右栏左缘 x=' + Math.round(q('.dict-main').getBoundingClientRect().left)
       + '  Δ=' + Math.round(q('.dict-main').getBoundingClientRect().left - q('.dict-cats').getBoundingClientRect().right));
+
+    /* —— 「在用」列与一致性卡片（本轮新增的两块） —— */
+    const useCells = qa('.dict-table tbody .dt-use');
+    out.push('当前类别=' + DictAdmin.current + '  选项来源=' + DictAdmin.usageSrc.table + '.' + DictAdmin.usageSrc.col);
+    out.push('在用列表头=' + qa('.dict-table thead .dt-use').length + ' 个，单元格=' + useCells.length
+      + ' 个（应与选项行数相同），首格=' + (useCells[0] ? useCells[0].textContent.trim() : '（无）'));
+    const consist = q('.dm-consist');
+    out.push('一致性卡片: ' + (consist ? box(consist) : '（没渲染 —— 应该有）'));
+    const alertEl = q('.du-alert');
+    out.push('  警示: ' + (alertEl ? alertEl.textContent.trim() : '（无；在 #renamed/#saveimpact 场景应出现）'));
+    const orRows = qa('.du-row');
+    out.push('  选项外的值 ' + orRows.length + ' 个 —— '
+      + (orRows.length ? orRows.map(r => r.querySelector('.du-val').textContent + '／'
+          + r.querySelector('.du-src').textContent + '／'
+          + r.querySelector('.du-cnt').textContent).join('  |  ') : '（本类别数据里的值都在选项表中）'));
+    out.push('  与台账对账: ' + DictAdmin.current + ' 覆盖 ' + [...DictAdmin.usage.values()].reduce((a, b) => a + b, 0)
+      + ' ' + DictAdmin.usageSrc.unit + '，去重后 ' + DictAdmin.usage.size + ' 个值；选项表 ' + DictAdmin.items.length + ' 项');
+    /* 一键收编：选项表 +1、选项外的值 −1（没有孤儿值时无事可做，不算失败） */
+    const adoptBtn = q('[data-act="adopt"]');
+    if (adoptBtn) {
+      const beforeN = DictAdmin.items.length, beforeOr = orRows.length;
+      adoptBtn.click();
+      const okAdopt = DictAdmin.items.length === beforeN + 1 && qa('.du-row').length === beforeOr - 1;
+      out.push('  点「加入选项」: 选项数 ' + beforeN + ' → ' + DictAdmin.items.length
+        + '，选项外的值 ' + beforeOr + ' → ' + qa('.du-row').length + (okAdopt ? ' ✓' : ' ✗'));
+    } else {
+      out.push('  没有需要收编的值，无需此动作 ✓');
+    }
 
     const d = document.createElement('pre');
     /* white-space:pre 而不是 pre-wrap —— 换行会让读数穿插在后面板内容里看不清。

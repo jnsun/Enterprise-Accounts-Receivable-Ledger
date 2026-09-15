@@ -885,10 +885,15 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
    为什么不用「12 个胶囊排一行」：类别名长短不一（最宽「单位（债权单位）」122px），
    横排要占满 1156px，且胶囊塞不下「项数」和「是否已自定义」这两个信息 ——
    而财务最需要知道的就是「哪些类别还只是内置默认、没落过库」。
-   竖排还顺手解决了另一个问题：这个页元素极少，横排时内容只占顶部约 40%，
-   下方近半屏是空白；竖排的 12 行正好把高度用起来。 */
-#page-dict:not(.hidden) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-#page-dict .dict-panel { flex: 1; min-height: 0; }
+   竖排还有个好处：这一页元素极少，横排时内容只占顶部约 40%，下方近半屏是空白。
+
+   ⚠ 但「竖排把高度用起来」不等于「把面板撑满视口」。早期给 #page-dict 写了
+   height:100%，百分比链因此解析出确定值，.dict-panel 被撑到满屏（实测 792px）；
+   而本页内容常常只有 4~6 行选项，右栏下方就空出 506px，看着像没渲染完。
+   现在面板按内容定高，长列表交给 .dm-body 自己滚，右栏空白由底部一致性卡片收尾。
+   flex-basis 用 auto 而不是 0：父容器高是 auto，basis:0 会把面板的可算高度算成 0。 */
+#page-dict:not(.hidden) { display: flex; flex-direction: column; min-height: 0; }
+#page-dict .dict-panel { flex: 1 1 auto; min-height: 0; }
 
 .dict-panel {
   display: grid; grid-template-columns: 212px minmax(0, 1fr);
@@ -908,9 +913,13 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 }
 .dc-total { font-weight: 400; color: var(--ink-400); font-variant-numeric: tabular-nums; }
 .dc-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--s1) 0; }
+/* 行高 29px（原 33px）：这 12 行是导航而不是内容，类别名最长 4 个字，33px 偏松；
+   而且左栏高度直接决定面板高度 —— 12 行 396px 比右栏的选项表高出一大截，
+   面板被左栏顶高后，右栏下方就空出一块（实测 94px）。压紧后降到 ~42px。
+   29px 仍在可点击下限（WCAG 2.5.8：24px）之上。 */
 .dc-item {
   display: flex; align-items: center; gap: var(--s2); width: 100%;
-  padding: 7px 14px; border: none; border-left: 2px solid transparent;
+  padding: 5px 14px; border: none; border-left: 2px solid transparent;
   background: none; color: var(--ink-700);
   font-family: var(--font); font-size: var(--t-sm); line-height: 1.5; text-align: left;
   cursor: pointer;
@@ -956,7 +965,16 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   content: ""; width: 5px; height: 5px; border-radius: 50%;
   background: var(--warn); box-shadow: 0 0 0 3px oklch(52% 0.12 66 / 0.16);
 }
-.dm-body { flex: 1; min-height: 0; overflow: auto; }
+/* flex 竖排是为了让底部的一致性卡片（.dm-consist，在 .dm-body 之外）能贴住底缘；
+   max-height 保证选项多时在卡片内部滚 —— 表头的 sticky 靠的正是这个滚动容器。
+   380px ≈ 顶栏 + 页头 + 面板头 + 一致性卡片 + 底部按钮区的合计高度，
+   留够这些之后面板才不会顶出视口（实测 15 行时右栏正好用满且页面无第二条滚动条）。 */
+.dm-body {
+  flex: 1; min-height: 0; overflow: auto;
+  display: flex; flex-direction: column;
+  max-height: max(240px, calc(100vh - 380px));
+}
+.dict-table { flex-shrink: 0; }
 
 /* — 选项表 — */
 .dict-table {
@@ -981,6 +999,18 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 .dict-table thead .dt-idx, .dict-table thead .dt-act { text-align: right; }
 .dict-table .dt-act { width: 118px; padding: 4px 10px; }
 .dict-table .dt-val { padding: 0; }
+/* 「在用」列：本选项被多少条台账（或附件）引用。
+   0 用一条空槽加灰「—」表示 —— 空槽本身就是「从未使用」的信号。
+   细条按本类别最高用量归一，只用于读数量级，不是精确图表。 */
+.dict-table .dt-use { width: 132px; padding: 8px 10px; }
+.du-cell { display: flex; align-items: center; gap: 8px; }
+.du-meter { flex: 1; min-width: 24px; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.du-meter > i { display: block; height: 100%; border-radius: 2px; background: var(--primary); }
+.du-n {
+  flex-shrink: 0; width: 34px; text-align: right;
+  font-size: var(--t-xs); color: var(--ink-600); font-variant-numeric: tabular-nums;
+}
+.du-n.is-zero { color: var(--ink-300); }
 /* 输入框默认"隐形"——看起来就是一行文本（像账簿里的条目）。
    4 行 4 个 32px 描边输入框堆在一起是"一堆表单框"，噪音远大于信息；
    hover 只为提示"这里能打字"，不改变行本身的观感。
@@ -1009,6 +1039,53 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   font-size: 14px; color: var(--ink-400);
   border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface-2);
 }
+
+/* — 底部：与台账数据的一致性 区（数据里在用、选项表里没有的值）—
+   这一块同时解决两件事：把「孤儿值」摆到财务眼前，以及让右栏下缘不再是空白。
+   margin-top:auto 把它压到右栏底缘，选项只有 4~6 行时也不会飘在中间。 */
+.dm-consist {
+  margin-top: auto;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 10px 16px 12px;
+}
+.du-head { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; margin-bottom: 7px; }
+.du-head b { font-size: var(--t-xs); font-weight: 600; color: var(--ink-600); letter-spacing: 0.04em; }
+.du-scope {
+  font-size: 11px; color: var(--ink-400);
+  padding: 0 6px; border-radius: 999px; border: 1px dashed var(--line-2);
+}
+.du-sum { margin-left: auto; font-size: var(--t-xs); color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.du-note { margin: 0; font-size: var(--t-xs); line-height: 1.8; color: var(--ink-500); }
+.du-ok { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--t-xs); color: var(--ok); }
+.du-ok::before { content: "✓"; font-weight: 700; }
+.du-alert {
+  margin-bottom: var(--s2); padding: 6px 10px;
+  font-size: var(--t-xs); line-height: 1.75;
+  color: oklch(42% 0.10 66); background: var(--warn-soft);
+  border: 1px solid var(--warn-line); border-radius: var(--r2);
+}
+.du-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 168px; overflow-y: auto;
+}
+.du-row {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: 4px 6px 4px 10px; border-radius: var(--r1);
+  background: var(--surface); border: 1px solid var(--line);
+  font-size: var(--t-xs);
+}
+.du-row.is-opt { border-color: var(--warn-line); background: var(--warn-soft); }
+.du-val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-700); }
+.du-src {
+  flex-shrink: 0; padding: 0 6px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-500);
+}
+.du-row.is-opt .du-src { border-color: var(--warn-line); background: transparent; color: var(--warn); }
+.du-cnt { flex-shrink: 0; color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.du-row .btn { flex-shrink: 0; }
+.du-tip { margin: var(--s2) 0 0; font-size: 11px; line-height: 1.75; color: var(--ink-400); }
 
 /* 操作按钮：旧版是 12×14px 的裸文本链接，三个紧挨着 —— 远低于 24×24 的可点击下限，
    而且「上移」和「删除」只差十几像素，误点后一保存就真的删掉了。
@@ -1522,7 +1599,11 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   .dict-cats { background: transparent; border-right: none; border-bottom: 1px solid #ccc; }
   .dc-list { overflow: visible; }
   .dict-main { display: block; }
-  .dm-body { overflow: visible; }
+  /* 纸面上不滚动：max-height / flex 都得撤掉，否则选项多的类别会被截断 */
+  .dm-body { overflow: visible; max-height: none !important; display: block !important; }
+  .dm-consist { margin-top: 0 !important; background: transparent; }
+  .du-list { max-height: none; overflow: visible; }
+  .dict-table { flex-shrink: initial; }
   .dict-table .dt-act, .dm-foot { display: none !important; }
   .dict-item { border: none; padding: 0; }
   a { color: inherit; text-decoration: none; }
