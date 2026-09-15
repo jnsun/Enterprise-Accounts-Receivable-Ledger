@@ -2,9 +2,12 @@
 /**
  * build-dashboard-preview.js - 生成自包含的数据看板预览页
  *
- * 用途：把 css/style.css + js/utils.js + js/dashboard.js + mock-data.js 内联成
- *       单个 HTML 文件，无需登录、无需数据库即可查看看板真实渲染效果
+ * 用途：把 css/style.css + js/fields.js + js/utils.js + js/dashboard.js + mock-data.js
+ *       内联成单个 HTML 文件，无需登录、无需数据库即可查看看板真实渲染效果
  *       （用于视觉验收：版面、字号、图表比例）。
+ *
+ * 注意：dashboard.js 会用到 fields.js 里的 TAG_COLORS，必须一并内联，
+ *       否则整页静默报 ReferenceError、只剩外壳（看不到任何图表）。
  *
  * 用法：node docs/preview/build-dashboard-preview.js
  * 产物：docs/preview/dashboard-preview.html
@@ -18,6 +21,7 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 const css = read('css/style.css');
+const fieldsJs = read('js/fields.js');
 const utilsJs = read('js/utils.js');
 const dashJs = read('js/dashboard.js');
 const mockJs = read('docs/preview/mock-data.js');
@@ -47,6 +51,7 @@ ${css}
   <b>拖动浏览器窗口改变宽度，图表内文字应保持同一大小</b>（本次修复的正是这一点）
 </div>
 <div id="root"></div>
+<script>${fieldsJs}</script>
 <script>${utilsJs}</script>
 <script>${dashJs}</script>
 <script>${mockJs}</script>

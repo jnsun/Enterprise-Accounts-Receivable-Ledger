@@ -138,8 +138,17 @@ const Ledger = {
     const attrs = this.attrCaps();
     const statuses = ['全部', ...Dicts.get('project_status')];
     const debts = ['全部', ...Dicts.get('debt_status')];
-    const cap = (group, val, cur) =>
-      `<button class="capsule ${val === cur ? 'active' : ''}" data-group="${group}" data-val="${Utils.escapeHtml(val)}" aria-pressed="${val === cur}" aria-label="${group === 'dept' ? '部门' : group === 'settled' ? '结清状态' : group === 'project_status' ? '项目状态' : group === 'debt_status' ? '债权状态' : '客户属性'}：${Utils.escapeHtml(val)}">${Utils.escapeHtml(val)}</button>`;
+    /* 「全部 / 未结」是本维度的默认值，命中默认值的选中态用淡色（见 .capsule.is-default）：
+       实心蓝只留给"这一维真的被筛过"，于是颜色本身就成了信息 —— 默认状态下一眼是素的 */
+    const cap = (group, val, cur) => {
+      const isDefault = val === (group === 'settled' ? '未结' : '全部');
+      const on = val === cur;
+      const label = { dept: '部门', settled: '结清状态', project_status: '项目状态',
+                      debt_status: '债权状态', client_attr: '客户属性' }[group];
+      return `<button class="capsule ${on ? 'active' : ''} ${on && isDefault ? 'is-default' : ''}"
+        data-group="${group}" data-val="${Utils.escapeHtml(val)}" aria-pressed="${on}"
+        aria-label="${label}：${Utils.escapeHtml(val)}">${Utils.escapeHtml(val)}</button>`;
+    };
     return `
       <div class="capsule-row"><span class="capsule-label">部门</span>${depts.length ? [cap('dept', '全部', this.filters.dept), ...depts.map(d => cap('dept', d, this.filters.dept))].join('') : '<span class="muted">暂无数据</span>'}</div>
       <div class="capsule-row"><span class="capsule-label">结清状态</span>${['未结', '已结清', '全部'].map(s => cap('settled', s, this.filters.settled)).join('')}</div>
@@ -217,19 +226,68 @@ const Ledger = {
       '<td></td>',
     ].join('');
 
-    const totalCols = 2 + defs.length + 1;
-    const emptyMsg = this.hasActiveFilter()
-      ? '当前筛选条件下没有记录<br>把「结清状态」切到「全部」，或清空搜索关键词即可看到更多'
-      : '台账还没有记录<br>点「＋ 新增记录」逐条录入，或用「⇪ 导入 Excel」批量导入';
+    /* 空状态：不放进表格里。
+       台账表宽可达 3000px+，而 <td colspan="N"> 里的居中内容会落在
+       整表的中点（约 x=1700），落在可视区之外 —— 也就是"一片空白什么都没有"。
+       改为独立面板，在可见区域内居中。 */
+    if (!rows.length) {
+      const noRows = this.hasActiveFilter();
+      return `
+      <div class="table-wrap is-empty">
+        <div class="empty-state">
+          <span class="es-badge" aria-hidden="true">▤</span>
+          <p class="es-title">${noRows ? '当前筛选条件下没有记录' : '台账还没有记录'}</p>
+          <p class="es-hint">${noRows
+            ? '把「结清状态」切回「未结」或「全部」，或清空搜索关键词'
+            : '点「＋ 新增记录」逐条录入，或用「⇪ 导入 Excel」批量导入'}</p>
+        </div>
+      </div>
+      <div class="table-status">${this.statusText(rows)}</div>`;
+    }
     return `
       <div class="table-wrap">
         <table class="ledger-table">
           <thead><tr>${headCells}</tr></thead>
-          <tbody>${bodyRows || `<tr><td colspan="${totalCols}" class="empty-cell">${emptyMsg}</td></tr>`}</tbody>
-          ${rows.length ? `<tfoot><tr>${footCells}</tr></tfoot>` : ''}
+          <tbody>${bodyRows}</tbody>
+          <tfoot><tr>${footCells}</tr></tfoot>
         </table>
       </div>
-      <div class="table-status">共 ${rows.length} 条记录 · 已选 ${this.selected.size} 条${this.filters.batch ? ' · 批次视图' : ''}</div>`;
+      <div class="table-status">${this.statusText(rows)}</div>`;
+  },
+
+  /** 表格下沿的状态条：总数 / 筛选后 / 已选 / 隐藏列（隐藏列提示用右侧淡字，避免用户以为列丢了） */
+  statusText(rows) {
+    const shown = (rows || this.filteredRows()).length;
+    const total = this.rows.length;
+    const left = [`共 ${total} 条`];
+    if (shown !== total) left.push(`筛选后 <b>${shown}</b> 条`);
+    if (this.selected.size) left.push(`已选 ${this.selected.size} 条`);
+    if (this.filters.batch) left.push('批次视图');
+    const hidden = ColPrefs.hiddenCount();
+    return left.join(' · ') +
+      (hidden ? `<span class="ts-right">已隐藏 ${hidden} 列 · 「▦ 列设置」可恢复</span>` : '');
+  },
+
+  /** 横向滚动提示：只在确实还有内容滚出去的一侧投影（配合 .table-wrap 的类名） */
+  syncOverflow() {
+    const wrap = document.querySelector('#ledger-table-box .table-wrap');
+    if (!wrap) return;
+    const max = wrap.scrollWidth - wrap.clientWidth;
+    wrap.classList.toggle('is-scrolled', max > 1 && wrap.scrollLeft > 2);
+    wrap.classList.toggle('has-more', max > 1 && wrap.scrollLeft < max - 2);
+  },
+
+  /** 表格重建后重新挂滚动监听（节点是新的，旧监听随之作废） */
+  bindOverflow() {
+    const wrap = document.querySelector('#ledger-table-box .table-wrap');
+    if (wrap) {
+      wrap.addEventListener('scroll', () => this.syncOverflow(), { passive: true });
+      this.syncOverflow();
+    }
+    if (!this._resizeBound) {
+      this._resizeBound = true;
+      window.addEventListener('resize', Utils.debounce(() => this.syncOverflow(), 150));
+    }
   },
 
   /** 是否有生效的筛选条件（用于区分「筛选无结果」与「真的没有数据」） */
@@ -244,6 +302,7 @@ const Ledger = {
     if (!main) return;
     main.innerHTML = this.renderToolbar() + this.renderCapsules() + '<div id="ledger-table-box">' + this.renderTable() + '</div>';
     this.bindEvents(main);
+    this.bindOverflow();
   },
 
   /** 只刷新表格区（筛选/勾选变化时避免整页重绘导致输入框失焦） */
@@ -256,6 +315,7 @@ const Ledger = {
       btn.disabled = !this.selected.size;
     }
     this.bindTableEvents(box);
+    this.bindOverflow();
   },
 
   /* ================= 事件 ================= */
@@ -311,7 +371,7 @@ const Ledger = {
       const btn = document.querySelector('[data-act="batch-del"]');
       if (btn) { btn.textContent = `删除选中（${this.selected.size}）`; btn.disabled = !this.selected.size; }
       const status = document.querySelector('.table-status');
-      if (status) status.textContent = `共 ${this.filteredRows().length} 条记录 · 已选 ${this.selected.size} 条${this.filters.batch ? ' · 批次视图' : ''}`;
+      if (status) status.innerHTML = this.statusText(this.filteredRows());
     }));
 
     root.querySelectorAll('th[data-sort]').forEach(th => th.addEventListener('click', () => {

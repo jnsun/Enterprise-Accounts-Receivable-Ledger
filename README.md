@@ -52,7 +52,9 @@
 │       ├── build-dashboard-preview.js  # 生成器：内联 CSS/JS → 看板单文件 HTML
 │       ├── dashboard-preview.html      # 产物（修改样式后重新运行生成器）
 │       ├── build-admin-preview.js      # 生成器：内联 CSS/JS → 用户管理单文件 HTML
-│       └── admin-preview.html          # 产物（两个视角 + #perm-modal 打开编辑弹窗）
+│       ├── admin-preview.html          # 产物（两个视角 + #perm-modal 打开编辑弹窗）
+│       ├── build-ledger-preview.js     # 生成器：内联 CSS/JS → 台账总览单文件 HTML
+│       └── ledger-preview.html         # 产物（含 #scrolled/#far/#core/#empty/#many/#measure 开关）
 ├── sql/
 │   ├── init-new-instance.sql            # ★ 全新 Supabase 项目一键初始化（推荐，含回款明细）
 │   ├── schema-standalone.sql            # 基础建表（departments/profiles/ar_ 核心表）
@@ -68,18 +70,44 @@
                             # 缺失时自动回退 jsDelivr CDN）
 ```
 
-### 看板 / 用户管理视觉预览（改完样式后自查）
+### 视觉预览（改完样式后自查）
 
 ```bash
 node docs/preview/build-dashboard-preview.js     # 重新生成 docs/preview/dashboard-preview.html
 node docs/preview/build-admin-preview.js         # 重新生成 docs/preview/admin-preview.html
+node docs/preview/build-ledger-preview.js        # 重新生成 docs/preview/ledger-preview.html
 ```
 
 产物是**自包含单文件**（内联 `css/style.css` + 对应 JS + 模拟数据），双击即可打开：无需登录、不连数据库，用来核对版面与字号。**修改样式或对应页面代码后要重新跑一次**生成器，预览页才会同步。
 
 用户管理预览会渲染两个视角（超级管理员 / 普通管理员），地址后加 `#perm-modal` 可直接打开编辑弹窗。
 
-> 表格布局铁律：**不要给 `<td>` 直接写 `display:flex/grid`**。td 一旦退出表格布局，匿名单元格包裹会让表头与表体的列边界错位、单元格之间出现无色缝（看起来像"奇怪的方块 + 没对齐的线条"）。正确做法是 td 内再套一个 `<div>` 承载 flex/grid。
+台账总览预览可用地址后的 hash 切场景（便于重现「只有横滚时才暴露」的问题）：
+
+| hash | 场景 |
+| --- | --- |
+| （无） | 默认，表格左端 + 顶部 |
+| `#scrolled` | 横向滚动 320px（冻结列 vs 滚动列的交界最容易穿帮） |
+| `#far` | 滚到最右（检验右侧操作列的投影提示） |
+| `#core` | 只显示常用列（列数少时不应出现横向滚动） |
+| `#empty` | 空数据（检验空状态面板居中） |
+| `#many` | 造 60 行（检验纵向滚动 + 表头/合计条固定） |
+| `#measure` | 注入探针浮层，打印冻结列实测宽度/边界与配色 |
+
+> **表格布局铁律一**：**不要给 `<td>` 直接写 `display:flex/grid`**。td 一旦退出表格布局，匿名单元格包裹会让表头与表体的列边界错位、单元格之间出现无色缝（看起来像"奇怪的方块 + 没对齐的线条"）。正确做法是 td 内再套一个 `<div>` 承载 flex/grid。
+
+> **表格布局铁律二**：**sticky 冻结列的 `left` 偏移必须严格等于该列的实际渲染宽度**。本表是 `table-layout: auto`（24 列按声明宽度会溢出，不能改 `fixed`），浏览器会把声明宽度**向内容最小宽度回缩**（声明 36px 实测只画到 29px）；若下一列仍按 `left:36px` 定位，两列之间就会露出正在横向滚动的单元格 —— 表现为「序号冻结后左边一片空白 + 文字残片穿帮」。因此宽度必须用同一变量在 `width` / `min-width` / `max-width` **三处同时锁死**：
+>
+> ```css
+> .ledger-table { --fc-check: 36px; --fc-idx: 40px; }
+> .ledger-table td.col-check { width: var(--fc-check); min-width: var(--fc-check); max-width: var(--fc-check); }
+> .ledger-table td.col-idx   { left: var(--fc-check); width: var(--fc-idx); min-width: var(--fc-idx); max-width: var(--fc-idx); }
+> ```
+>
+> 改完请用 `#measure` 复核：两列宽度集合应恒为单值（`[36]` / `[40]`），且「冻结区右边界 x」应等于「下一列左边界 x」（间隙 0.0px）。
+
+> **空状态不要塞进表格里**：台账表宽可达 3000px+，`<td colspan="23">` 里的居中内容会落在**整表**的中点（约 x=1700），落在可视区之外 —— 也就是"一片空白什么都没有"。空状态改用独立的 `.table-wrap.is-empty` + `.empty-state` 面板，在可见区域内居中。
+
 
 ### 已运行 v3 的库升级到 v3.1（回款明细）
 

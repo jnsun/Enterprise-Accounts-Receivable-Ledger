@@ -1,0 +1,3183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台账总览预览 · 企业应收账款台账系统</title>
+<style>
+/* ==========================================================================
+   企业应收账款台账系统 · 样式表
+   设计语言：账簿工业风 Ledger Industrial（精确 / 稳重 / 克制）
+   上下文见 .impeccable.md；令牌改动请同步该文件
+
+   分层：① 设计令牌 ② 基础与排版 ③ 原子 ④ 组件 ⑤ 响应式 ⑥ 打印
+   ========================================================================== */
+
+/* ==========================================================================
+   ① 设计令牌
+   ========================================================================== */
+:root {
+  /* — 中性色阶（冷调灰，色相偏主色 258°，避免"死灰"） — */
+  --ink-950: oklch(21% 0.030 258);
+  --ink-900: oklch(28% 0.028 258);   /* 侧边栏底色 */
+  --ink-800: oklch(35% 0.024 258);
+  --ink-700: oklch(42% 0.021 258);   /* 正文主色 */
+  --ink-600: oklch(51% 0.019 258);   /* 正文次色 */
+  --ink-500: oklch(60% 0.017 258);   /* 辅助文本（12px 下限） */
+  --ink-400: oklch(72% 0.013 258);   /* 占位/禁用 */
+  --ink-300: oklch(80% 0.012 258);   /* 深底上的文本 */
+  --ink-100: oklch(93% 0.008 258);
+
+  --line: oklch(91.5% 0.008 258);    /* 发丝分隔线 */
+  --line-2: oklch(85.5% 0.012 258);  /* 强分隔线 / 控件描边 */
+
+  --bg: oklch(96.8% 0.006 258);      /* 页面底 */
+  --surface: oklch(99.4% 0.002 258); /* 卡片/表格底（非纯白） */
+  --surface-2: oklch(98.1% 0.005 258); /* 斑马行 / 次级面板 */
+  --surface-3: oklch(95.4% 0.008 258); /* 表头底 / 悬浮态 */
+
+  /* — 主色：深靛蓝（区别于默认亮蓝，稳重可信） — */
+  --primary: oklch(45% 0.130 258);
+  --primary-600: oklch(39.5% 0.130 258);
+  --primary-soft: oklch(95% 0.032 258);
+  --primary-line: oklch(86% 0.065 258);
+
+  /* — 语义色（朱砂红为唯一"警示"强调色，仅用于风险与危险操作） — */
+  --danger: oklch(50% 0.185 28);
+  --danger-600: oklch(43% 0.175 28);
+  --danger-soft: oklch(96% 0.028 28);
+  --danger-line: oklch(87% 0.070 28);
+
+  --ok: oklch(50% 0.110 152);
+  --ok-soft: oklch(96% 0.030 152);
+  --ok-line: oklch(87% 0.065 152);
+
+  --warn: oklch(52% 0.120 66);
+  --warn-soft: oklch(96.5% 0.035 78);
+  --warn-line: oklch(87% 0.080 78);
+
+  --teal: oklch(47% 0.088 195);
+  --teal-soft: oklch(96% 0.025 195);
+  --violet: oklch(45% 0.140 300);
+  --violet-soft: oklch(96% 0.025 300);
+
+  --focus: oklch(58% 0.155 258);
+
+  /* — 排版 — */
+  --font: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Segoe UI",
+          system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --t-xs: 0.75rem;      /* 12px 辅助说明 */
+  --t-sm: 0.8125rem;    /* 13px 表格单元格 */
+  --t-base: 0.875rem;   /* 14px 正文 */
+  --t-md: 1rem;         /* 16px 页面标题 */
+  --t-lg: 1.125rem;     /* 18px 区块标题 */
+  --t-xl: 1.375rem;     /* 22px 弹窗标题 */
+  --t-2xl: 1.75rem;     /* 28px KPI 数字 */
+  --lh-tight: 1.35;
+  --lh-base: 1.55;
+
+  /* — 空间（4 的倍数，按角色取用，制造节奏而非平铺） — */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px;
+
+  /* — 圆角（收敛到三档，不再出现 8/12/14 混用） — */
+  --r1: 4px; --r2: 6px; --r3: 10px; --r-pill: 999px;
+
+  /* — 阴影：卡片靠发丝线，浮层才用阴影 — */
+  --sh1: 0 1px 2px oklch(21% 0.03 258 / 0.05);
+  --sh2: 0 6px 18px oklch(21% 0.03 258 / 0.10);
+  --sh3: 0 18px 48px oklch(21% 0.03 258 / 0.18);
+
+  /* — 动效：只动 transform/opacity/color，指数缓出 — */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-f: 120ms;
+  --dur: 200ms;
+
+  /* 表格行底色（供冻结列继承，避免透明穿帮） */
+  --row-bg: var(--surface);
+  --row-alt: oklch(97.7% 0.006 258);   /* 斑马行：原为 surface-2（98.1%），与白底差 1.3% 实际看不出来 */
+  --row-hover: oklch(96.5% 0.013 258); /* 必须比斑马行更深，否则偶数行 hover 反而变浅 */
+  --row-checked: var(--primary-soft);
+  --thead-bg: var(--surface-3);
+  --thead-fc-bg: oklch(93.6% 0.010 258); /* 冻结区表头（比表头底再深一档，标示"这列被冻住了"） */
+  --foot-bg: oklch(96.2% 0.010 258);
+}
+
+/* ==========================================================================
+   ② 基础与排版
+   ========================================================================== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+html { -webkit-text-size-adjust: 100%; }
+#root { min-height: 100vh; }
+
+body {
+  font-family: var(--font);
+  font-size: var(--t-base);
+  line-height: var(--lh-base);
+  font-kerning: normal;
+  background: var(--bg);
+  color: var(--ink-700);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--primary); cursor: pointer; text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+h1, h2, h3, h4 { color: var(--ink-950); line-height: var(--lh-tight); font-weight: 600; }
+h1 { font-size: var(--t-xl); }
+h2 { font-size: var(--t-md); }
+h3 { font-size: var(--t-base); }
+
+::selection { background: oklch(88% 0.06 258); color: var(--ink-950); }
+
+/* 焦点可见性（键盘用户专用，鼠标点击不出现） */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r1);
+}
+:focus:not(:focus-visible) { outline: none; }
+
+/* ==========================================================================
+   ③ 原子
+   ========================================================================== */
+.hidden { display: none !important; }
+.muted { color: var(--ink-500); font-size: var(--t-xs); }
+.ta-r { text-align: right; }
+.text-danger { color: var(--danger); }
+.text-ok { color: var(--ok); }
+.page { display: block; }
+
+/* ==========================================================================
+   ④ 组件
+   ========================================================================== */
+
+/* ---------- 按钮 ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s1);
+  padding: 6px 13px; min-height: 30px;
+  border: 1px solid var(--line-2); border-radius: var(--r2);
+  background: var(--surface); color: var(--ink-700);
+  font-family: var(--font); font-size: var(--t-base); line-height: 1.2;
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--dur-f) var(--ease), border-color var(--dur-f) var(--ease),
+              color var(--dur-f) var(--ease), transform var(--dur-f) var(--ease);
+}
+.btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled, .btn[disabled] { opacity: 0.42; cursor: not-allowed; transform: none; }
+.btn:disabled:hover { border-color: var(--line-2); color: var(--ink-700); background: var(--surface); }
+
+.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--surface); }
+.btn-primary:hover { background: var(--primary-600); border-color: var(--primary-600); color: var(--surface); }
+.btn-primary:disabled:hover { background: var(--primary); border-color: var(--primary); }
+
+.btn-danger { background: var(--danger); border-color: var(--danger); color: var(--surface); }
+.btn-danger:hover { background: var(--danger-600); border-color: var(--danger-600); color: var(--surface); }
+
+.btn-danger-plain { color: var(--danger); border-color: var(--danger-line); background: var(--surface); }
+.btn-danger-plain:hover { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+
+.btn-xs { padding: 3px 9px; min-height: 24px; font-size: var(--t-xs); border-radius: var(--r1); }
+.btn-sm { padding: 5px 11px; min-height: 28px; font-size: var(--t-sm); }
+.btn-lg { padding: 10px 26px; min-height: 42px; font-size: var(--t-md); }
+.btn-block { width: 100%; }
+
+/* ---------- 输入控件 ---------- */
+.ipt {
+  padding: 6px 10px; min-height: 30px;
+  border: 1px solid var(--line-2); border-radius: var(--r2);
+  background: var(--surface); color: var(--ink-700);
+  font-family: var(--font); font-size: var(--t-base); line-height: 1.3;
+  transition: border-color var(--dur-f) var(--ease), box-shadow var(--dur-f) var(--ease);
+}
+.ipt::placeholder { color: var(--ink-400); }
+.ipt:focus { border-color: var(--primary); box-shadow: 0 0 0 3px oklch(45% 0.13 258 / 0.13); outline: none; }
+.ipt:disabled { background: var(--surface-2); color: var(--ink-500); cursor: not-allowed; }
+textarea.ipt { min-height: 62px; line-height: var(--lh-base); resize: vertical; }
+select.ipt { padding-right: 26px; cursor: pointer; }
+
+/* ---------- 登录页 ---------- */
+.login-wrap {
+  min-height: 100vh; display: grid; place-items: center; padding: var(--s5);
+  background:
+    radial-gradient(120% 80% at 50% -20%, oklch(94% 0.020 258) 0%, transparent 60%),
+    repeating-linear-gradient(0deg, oklch(93% 0.008 258 / 0.5) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(90deg, oklch(93% 0.008 258 / 0.5) 0 1px, transparent 1px 32px),
+    var(--bg);
+}
+.login-card {
+  width: 396px; max-width: 100%;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r3); padding: var(--s6) var(--s6) var(--s5);
+  box-shadow: var(--sh3);
+}
+.login-logo {
+  width: 46px; height: 46px; margin-bottom: var(--s4);
+  border-radius: var(--r2); background: var(--ink-900);
+  color: var(--surface); font-size: 22px; line-height: 46px; font-weight: 600;
+  text-align: center; letter-spacing: 0;
+}
+.login-title { font-size: var(--t-lg); font-weight: 600; margin-bottom: var(--s1); letter-spacing: -0.01em; }
+.login-sub { font-size: var(--t-sm); color: var(--ink-500); margin-bottom: var(--s5); }
+.login-form { display: flex; flex-direction: column; gap: var(--s3); }
+.login-form .form-field { gap: 5px; }
+.login-foot {
+  margin-top: var(--s5); padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-xs); color: var(--ink-500); line-height: 1.7;
+}
+
+/* ---------- 主框架 ---------- */
+.app-shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: 210px; flex-shrink: 0; background: var(--ink-900); color: var(--ink-300);
+  display: flex; flex-direction: column; position: sticky; top: 0;
+  height: 100vh; overflow-y: auto;
+  border-right: 1px solid oklch(32% 0.02 258);
+}
+.side-brand {
+  padding: var(--s5) var(--s4) var(--s4);
+  font-size: 15px; font-weight: 600; color: var(--surface);
+  letter-spacing: 0.02em; line-height: 1.45;
+  border-bottom: 1px solid oklch(34% 0.02 258);
+}
+.side-nav { padding: var(--s3) var(--s2); display: flex; flex-direction: column; gap: 1px; }
+.nav-item {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: 8px var(--s3); border: none; border-radius: var(--r2);
+  background: transparent; color: var(--ink-300);
+  font-family: var(--font); font-size: var(--t-base); text-align: left;
+  cursor: pointer; width: 100%; position: relative;
+  transition: background var(--dur-f) var(--ease), color var(--dur-f) var(--ease);
+}
+.nav-item:hover { background: oklch(34% 0.022 258); color: var(--surface); }
+.nav-item.active {
+  background: oklch(36% 0.045 258); color: var(--surface); font-weight: 500;
+}
+.nav-item.active::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
+  background: oklch(72% 0.11 258); border-radius: 2px;
+}
+.nav-icon { width: 17px; text-align: center; opacity: 0.7; font-size: 13px; }
+.nav-item.active .nav-icon { opacity: 1; }
+
+.side-perms {
+  margin-top: auto; padding: var(--s4) var(--s4) var(--s5);
+  border-top: 1px solid oklch(34% 0.02 258);
+}
+.sp-title {
+  font-size: 11px; color: oklch(72% 0.015 258);
+  letter-spacing: 0.08em; text-transform: none; margin-bottom: var(--s2);
+}
+.perm-list { list-style: none; }
+.perm-list li {
+  display: flex; align-items: center; gap: 7px; padding: 2.5px 0;
+  font-size: var(--t-xs); color: oklch(62% 0.014 258);
+}
+.perm-list li.on { color: var(--ink-300); }
+.pm-icon { width: 13px; text-align: center; font-weight: 600; font-size: 11px; }
+.perm-list li.on .pm-icon { color: oklch(78% 0.14 152); }
+.perm-list li.off .pm-icon { color: oklch(46% 0.012 258); }
+
+.app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  min-height: 54px; background: var(--surface); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s4);
+  padding: 0 var(--s5); position: sticky; top: 0; z-index: 20;
+}
+.topbar-left { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.topbar-title {
+  font-size: var(--t-md); font-weight: 600; color: var(--ink-950);
+  letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.topbar-user { display: flex; align-items: center; gap: var(--s3); }
+.user-dept {
+  font-size: var(--t-xs); color: var(--primary); background: var(--primary-soft);
+  border: 1px solid var(--primary-line); padding: 2px 10px; border-radius: var(--r-pill);
+}
+.user-name { font-size: var(--t-sm); font-weight: 500; color: var(--ink-700); }
+
+.page-container { padding: var(--s4) var(--s5) var(--s7); flex: 1; min-width: 0; }
+/* 台账总览：让表格吃掉剩余高度，页面自己不再产生第二条滚动条
+   （旧实现用 max-height: calc(100vh - 252px) 猜顶部控件高度，加一行筛选就错位）。
+   注意只给 #page-ledger 挂弹性链，不动 .page-container —— 否则看板等长页面
+   会被压成"视口高 + 内容溢出"，容器自身的底部内边距就白给了。
+   height:100% 能生效，是因为 .page-container 在 .app-main 里由 flex 定高。 */
+#page-ledger:not(.hidden) {
+  display: flex; flex-direction: column; height: 100%; min-height: 0;
+}
+#page-ledger #ledger-table-box { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* 表格卡片贴着数据收边（内容高就撑满、超出才出现内滚动），
+   而不是拉成一个大白框、让合计行孤零零浮在中间 */
+#page-ledger .table-wrap { flex: 0 1 auto; min-height: 0; max-height: 100%; }
+/* 空状态没有"数据高度"可贴，若仍按内容收边就会在下方留一大片空白；
+   这里让它吃掉剩余高度，把引导文案在可视区正中呈现 */
+#page-ledger .table-wrap.is-empty { flex: 1 1 auto; max-height: 100%; }
+.page-head { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s3); flex-wrap: wrap; }
+.page-head h2 { font-size: var(--t-md); font-weight: 600; letter-spacing: -0.01em; }
+.page-head h3 { font-size: var(--t-base); }
+.page-head .muted { flex: 1; min-width: 200px; }
+
+/* ---------- 工具栏 / 筛选胶囊 ---------- */
+.toolbar {
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s3);
+  margin-bottom: var(--s2); flex-wrap: wrap;
+}
+.toolbar-left { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.toolbar-right { display: flex; gap: var(--s2); flex-wrap: wrap; }
+
+.kw-input {
+  width: 300px; padding: 6px 13px; min-height: 30px;
+  border: 1px solid var(--line-2); border-radius: var(--r-pill);
+  background: var(--surface); font-family: var(--font); font-size: var(--t-base); color: var(--ink-700);
+  transition: border-color var(--dur-f) var(--ease), box-shadow var(--dur-f) var(--ease);
+}
+.kw-input::placeholder { color: var(--ink-400); }
+.kw-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px oklch(45% 0.13 258 / 0.13); outline: none; }
+
+.batch-chip {
+  display: inline-flex; align-items: center; gap: var(--s1);
+  background: var(--warn-soft); color: oklch(42% 0.11 66);
+  border: 1px solid var(--warn-line); padding: 3px 12px; border-radius: var(--r-pill);
+  font-size: var(--t-xs); font-weight: 500;
+}
+.batch-chip a { margin-left: var(--s1); font-weight: 600; color: inherit; }
+
+/* 筛选区：5 行胶囊本身已占掉不少竖向空间，行距收紧一档把表格往上提 */
+.capsule-row {
+  display: flex; align-items: center; gap: 3px 5px; flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.capsule-label {
+  font-size: var(--t-xs); color: var(--ink-400);
+  width: 56px; flex-shrink: 0; letter-spacing: 0.02em;
+}
+.capsule {
+  padding: 3px 12px; border: 1px solid var(--line-2); border-radius: var(--r-pill);
+  background: var(--surface); color: var(--ink-600);
+  font-family: var(--font); font-size: var(--t-xs); line-height: 1.6;
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--dur-f) var(--ease), border-color var(--dur-f) var(--ease),
+              color var(--dur-f) var(--ease);
+}
+.capsule:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.capsule.active {
+  background: var(--primary); border-color: var(--primary); color: var(--surface); font-weight: 500;
+}
+/* 默认值（全部 / 未结）被选中时用淡色：实心蓝只表示"这一维真的筛过"，
+   否则 5 行胶囊各挂一颗实心蓝，颜色不再承载任何信息 */
+.capsule.active.is-default {
+  background: var(--primary-soft); border-color: var(--primary-line);
+  color: var(--primary); font-weight: 500;
+}
+.capsule.active.is-default:hover {
+  background: oklch(92.5% 0.042 258); border-color: var(--primary);
+}
+
+/* ---------- 表格容器 ---------- */
+.table-wrap {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2);
+  overflow: auto; box-shadow: var(--sh1); overscroll-behavior: contain;
+  max-height: calc(100vh - 252px);
+}
+.ledger-table, .map-table, .batch-table, .admin-table, .invoice-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  font-size: var(--t-sm); font-variant-numeric: tabular-nums;
+}
+.ledger-table th, .ledger-table td { padding: 6px 8px; }
+
+/* 表头：固定 + 换行 + 发丝下沿 */
+.ledger-table thead th {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--thead-bg); color: var(--ink-600);
+  font-weight: 600; font-size: var(--t-xs); line-height: var(--lh-tight);
+  letter-spacing: 0.01em;
+  padding: 8px; white-space: normal; word-break: break-word;
+  vertical-align: middle; cursor: default;
+  border-bottom: 1px solid var(--line-2);
+  box-shadow: inset 0 -1px 0 var(--line), 0 1px 0 oklch(21% 0.03 258 / 0.03);
+}
+.ledger-table thead th.ta-r { padding-right: 10px; }
+th[data-sort] { cursor: pointer; user-select: none; transition: color var(--dur-f) var(--ease); }
+th[data-sort]:hover { color: var(--primary); background: var(--surface-2); }
+th.sorted { color: var(--primary); }
+th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.8; }
+
+/* 数据行：行底色走变量，冻结列可继承（不透明，不穿帮） */
+.ledger-table tbody tr { --row-bg: var(--surface); }
+.ledger-table tbody tr:nth-child(even) { --row-bg: var(--row-alt); }
+.ledger-table tbody tr:hover { --row-bg: var(--row-hover); }
+.ledger-table tbody tr.row-checked { --row-bg: var(--row-checked); }
+.ledger-table tbody td {
+  background: var(--row-bg);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  vertical-align: middle; line-height: 1.5;
+}
+.ledger-table tbody tr:last-child td { border-bottom: none; }
+
+/* 冻结列：左侧「勾选 + 序号」，右侧「操作」。
+   ⚠️ 冻结列的【实际宽度】必须与 left 偏移严格相等。
+   本表是 table-layout:auto，浏览器会把声明宽度向内容最小宽度回缩
+   （勾选列声明 36px、实际只画到 29px），此时只写 width 会让冻结列
+   比偏移窄，两列之间露出一条正在横向滚动的单元格 —— 表现为
+   「序号冻结后左边有一片空白 / 穿帮」。故宽度只定义一次，三处锁死。 */
+.ledger-table {
+  --fc-check: 36px;                              /* 勾选列宽 */
+  --fc-idx: 40px;                                /* 序号列宽 */
+  --fc-act: 104px;                               /* 操作列宽 */
+  --fc-w: calc(var(--fc-check) + var(--fc-idx)); /* 冻结区总宽 */
+}
+.ledger-table th.col-check, .ledger-table td.col-check {
+  position: sticky; left: 0; z-index: 3;
+  width: var(--fc-check); min-width: var(--fc-check); max-width: var(--fc-check);
+  text-align: center;
+}
+.ledger-table th.col-idx, .ledger-table td.col-idx {
+  position: sticky; left: var(--fc-check); z-index: 3;
+  width: var(--fc-idx); min-width: var(--fc-idx); max-width: var(--fc-idx);
+  text-align: center; color: var(--ink-500); font-size: var(--t-xs);
+  box-shadow: inset -1px 0 0 var(--line);
+}
+.ledger-table th.col-actions, .ledger-table td.col-actions {
+  position: sticky; right: 0; z-index: 3;
+  width: var(--fc-act); min-width: var(--fc-act); max-width: var(--fc-act);
+  box-shadow: inset 1px 0 0 var(--line);
+}
+.ledger-table thead th.col-check, .ledger-table thead th.col-idx,
+.ledger-table thead th.col-actions { z-index: 8; }
+/* 冻住的两列：表头底色再深一档，与右侧滑动区分开 */
+.ledger-table thead th.col-check, .ledger-table thead th.col-idx { background: var(--thead-fc-bg); }
+
+/* 横向滚动提示：只在确实还有内容被滚出去的那一侧投影（类名由 ledger.js 的 syncOverflow 维护） */
+.table-wrap.is-scrolled .ledger-table th.col-idx,
+.table-wrap.is-scrolled .ledger-table td.col-idx {
+  box-shadow: inset -1px 0 0 var(--line), 12px 0 14px -12px oklch(21% 0.03 258 / 0.22);
+}
+.table-wrap.has-more .ledger-table th.col-actions,
+.table-wrap.has-more .ledger-table td.col-actions {
+  box-shadow: inset 1px 0 0 var(--line), -12px 0 14px -12px oklch(21% 0.03 258 / 0.22);
+}
+
+.col-actions { text-align: center; white-space: nowrap; }
+.col-actions a { margin: 0 5px; font-size: var(--t-xs); }
+.link-danger { color: var(--danger); }
+
+/* 单元格语义 */
+.td-money { font-variant-numeric: tabular-nums; letter-spacing: 0.005em; }
+.td-money.owed { color: var(--danger); font-weight: 600; }
+.td-money.neg { color: var(--danger); }
+.td-date { color: var(--ink-600); font-variant-numeric: tabular-nums; }
+.td-name { line-height: 1.45; white-space: normal; word-break: break-word; }
+/* 合计行：原本只有金额格带底纹，中间一格一格是透明的，视觉上像一条
+   「断成几截的空白带」；改为整条铺满，并固定在表格底部当作实时合计条 */
+.ledger-table tfoot td {
+  position: sticky; bottom: 0; z-index: 4;
+  background: var(--foot-bg);
+  border-top: 1px solid var(--line-2);
+  box-shadow: inset 0 1px 0 var(--line);
+}
+.td-foot { font-weight: 600; color: var(--ink-950); }
+.ledger-table tfoot td.td-foot-label {
+  left: 0; z-index: 6;
+  font-weight: 600; color: var(--ink-600);
+  box-shadow: inset 0 1px 0 var(--line), inset -1px 0 0 var(--line);
+}
+.table-wrap.is-scrolled .ledger-table tfoot td.td-foot-label {
+  box-shadow: inset 0 1px 0 var(--line), inset -1px 0 0 var(--line),
+              12px 0 14px -12px oklch(21% 0.03 258 / 0.22);
+}
+.empty-cell {
+  text-align: center; color: var(--ink-500); padding: var(--s7) var(--s4) !important;
+  font-size: var(--t-sm); line-height: 1.9; background: var(--surface);
+}
+.empty-cell::before {
+  content: "▤"; display: block; margin: 0 auto var(--s3);
+  width: 36px; height: 36px; line-height: 34px;
+  font-size: 15px; color: var(--ink-400);
+  border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface-2);
+}
+.empty-cell b { color: var(--ink-700); font-weight: 600; }
+/* 台账空状态用独立面板：这张表宽可达 3000px+，
+   <td colspan="N"> 里的居中内容会落在整表中点（可视区之外），等于一片空白 */
+.table-wrap.is-empty {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 220px; padding: var(--s6) var(--s4);
+}
+.empty-state { text-align: center; max-width: 440px; }
+.es-badge {
+  display: block; width: 40px; height: 40px; margin: 0 auto var(--s3);
+  line-height: 38px; font-size: 17px; color: var(--ink-400);
+  border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface-2);
+}
+.es-title { font-size: var(--t-base); font-weight: 600; color: var(--ink-700); }
+.es-hint { margin-top: 6px; font-size: var(--t-sm); color: var(--ink-500); line-height: 1.75; }
+.table-status {
+  display: flex; align-items: baseline; gap: var(--s3);
+  margin-top: var(--s2); padding: 0 2px;
+  font-size: var(--t-xs); color: var(--ink-500);
+}
+.table-status .ts-right { margin-left: auto; color: var(--ink-400); }
+.table-status b { color: var(--ink-700); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* .row-admin 的整行粉色底已移除：斑马行 + 首列竖标记已足够，染色反而形成色块 */
+.att-has { color: var(--primary); font-weight: 500; }
+
+/* ---------- 标签 ---------- */
+.tag {
+  display: inline-block; padding: 1px 8px; border-radius: var(--r-pill);
+  font-size: 11.5px; line-height: 1.6; font-weight: 500;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.tag-blue   { background: var(--primary-soft); color: var(--primary); border-color: var(--primary-line); }
+.tag-green  { background: var(--ok-soft);      color: var(--ok);      border-color: var(--ok-line); }
+.tag-teal   { background: var(--teal-soft);    color: var(--teal);    border-color: oklch(87% 0.05 195); }
+.tag-gray   { background: var(--surface-3);    color: var(--ink-600);  border-color: var(--line); }
+.tag-red    { background: var(--danger-soft);  color: var(--danger);  border-color: var(--danger-line); }
+.tag-orange { background: var(--warn-soft);    color: var(--warn);    border-color: var(--warn-line); }
+/* 兼容历史类名（超期预警） */
+.tag-settled { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }
+.tag-overdue { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-line); font-weight: 600; }
+.tag-soon    { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+.tag-ok      { background: var(--surface-3); color: var(--ink-600); border-color: var(--line); }
+.tag-none    { background: transparent; color: var(--ink-500); }
+
+/* ---------- 弹窗 ---------- */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 100;
+  background: oklch(21% 0.03 258 / 0.42);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--s5); animation: mask-in var(--dur) var(--ease);
+}
+.modal {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r3);
+  width: 640px; max-width: 96vw; max-height: 90vh;
+  display: flex; flex-direction: column; box-shadow: var(--sh3);
+  animation: modal-in var(--dur) var(--ease);
+}
+@keyframes mask-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+.modal-sm { width: 400px; }
+.modal-lg { width: 780px; }
+.modal-xl { width: min(1060px, 96vw); }
+.modal-xl .modal-body { max-height: calc(100vh - 200px); overflow-y: auto; }
+.modal-header {
+  padding: var(--s4) var(--s5); font-size: var(--t-base); font-weight: 600; color: var(--ink-950);
+  border-bottom: 1px solid var(--line);
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s4);
+}
+.modal-close {
+  cursor: pointer; font-size: 20px; line-height: 1; color: var(--ink-400);
+  width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r1); transition: background var(--dur-f) var(--ease), color var(--dur-f) var(--ease);
+}
+.modal-close:hover { background: var(--surface-3); color: var(--ink-950); }
+.modal-tabs { display: flex; gap: var(--s1); padding: var(--s2) var(--s4) 0; border-bottom: 1px solid var(--line); }
+.mtab {
+  padding: 8px 15px; border: none; background: transparent; cursor: pointer;
+  font-family: var(--font); font-size: var(--t-base); color: var(--ink-500);
+  border-bottom: 2px solid transparent; border-radius: var(--r1) var(--r1) 0 0;
+  transition: color var(--dur-f) var(--ease), border-color var(--dur-f) var(--ease);
+}
+.mtab:hover { color: var(--primary); }
+.mtab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.modal-body { padding: var(--s4) var(--s5); overflow-y: auto; }
+.modal-footer {
+  padding: var(--s3) var(--s5); border-top: 1px solid var(--line);
+  display: flex; justify-content: flex-end; gap: var(--s2); background: var(--surface-2);
+  border-radius: 0 0 var(--r3) var(--r3);
+}
+.confirm-msg { line-height: 1.8; color: var(--ink-700); }
+
+/* ---------- 表单 ---------- */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3) var(--s4); }
+.form-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.form-full { grid-column: 1 / -1; margin-top: var(--s3); }
+.ff-label { font-size: var(--t-xs); color: var(--ink-600); letter-spacing: 0.01em; }
+.form-hint { font-size: var(--t-xs); color: var(--ink-500); margin-top: var(--s3); line-height: 1.7; }
+.ff-dept { grid-column: 1 / -1; max-width: 320px; }
+.form-sec { padding: 2px 0 var(--s4); border-bottom: 1px solid var(--line); }
+.form-sec:last-of-type { border-bottom: none; }
+.form-sec-title {
+  font-size: var(--t-sm); font-weight: 600; color: var(--ink-950);
+  margin: var(--s4) 0 var(--s3); display: flex; align-items: center; gap: var(--s2);
+}
+.form-sec-title::before {
+  content: ""; width: 3px; height: 13px; border-radius: 2px; background: var(--primary);
+  flex-shrink: 0;
+}
+.form-sec-tag {
+  font-size: 11px; font-weight: 400; color: var(--primary);
+  background: var(--primary-soft); border: 1px solid var(--primary-line);
+  border-radius: var(--r-pill); padding: 1px 8px;
+}
+.form-sec-tag.warn { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
+
+/* 锁定字段（部门账号不可编辑） */
+.ff-locked .ipt { background: var(--surface-3); color: var(--ink-400); cursor: not-allowed; }
+.ff-locked .ff-label { color: var(--ink-400); }
+.lock-banner {
+  font-size: var(--t-sm); color: oklch(42% 0.10 66);
+  background: var(--warn-soft); border: 1px solid var(--warn-line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r2); padding: var(--s2) var(--s3); margin-bottom: var(--s2);
+  line-height: 1.7;
+}
+
+/* 实时计算条（账内 / 账外 / 余额） */
+.calc-bar {
+  display: flex; gap: var(--s5); flex-wrap: wrap;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r2); padding: var(--s3) var(--s4); margin-top: var(--s3);
+  border-left: 3px solid var(--primary);
+}
+.calc-bar span {
+  font-size: var(--t-xs); color: var(--ink-500);
+  display: flex; align-items: baseline; gap: 6px;
+}
+.calc-bar b {
+  font-size: 15px; color: var(--ink-950); font-weight: 600;
+  font-variant-numeric: tabular-nums; letter-spacing: 0.005em;
+}
+.calc-bar i { font-size: 11px; font-style: normal; color: var(--ink-400); }
+
+.editor-error {
+  color: var(--danger); background: var(--danger-soft);
+  border: 1px solid var(--danger-line); border-left: 3px solid var(--danger);
+  border-radius: var(--r2); padding: var(--s2) var(--s3);
+  font-size: var(--t-sm); margin-top: var(--s3); line-height: 1.7;
+}
+
+/* select + 其他自由填写 */
+.sel-free { display: flex; flex-direction: column; gap: 6px; }
+
+/* ---------- 导入 ---------- */
+.file-pick {
+  border: 1px dashed var(--line-2); border-radius: var(--r3);
+  padding: var(--s6) var(--s5); text-align: center; color: var(--ink-500);
+  cursor: pointer; margin-bottom: var(--s4);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease),
+              color var(--dur) var(--ease);
+}
+.file-pick:hover, .file-pick.drag {
+  border-color: var(--primary); background: var(--primary-soft); color: var(--primary);
+}
+.file-pick .muted { display: block; margin-top: 4px; }
+.fp-icon { font-size: 26px; margin-bottom: var(--s2); color: var(--ink-400); line-height: 1; }
+.file-pick:hover .fp-icon, .file-pick.drag .fp-icon { color: var(--primary); }
+.import-opts { margin-top: var(--s1); }
+.import-step { display: flex; flex-direction: column; }
+.import-meta { margin-bottom: var(--s2); font-size: var(--t-base); color: var(--ink-700); }
+.import-meta b { color: var(--ink-950); }
+.map-wrap { max-height: 320px; }
+.map-table th, .map-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.map-table thead th {
+  background: var(--thead-bg); font-size: var(--t-xs); color: var(--ink-600);
+  position: sticky; top: 0; font-weight: 600;
+}
+.map-src { font-weight: 500; color: var(--ink-700); }
+.map-sample { color: var(--ink-500); font-size: var(--t-xs); }
+.map-table tr.map-miss td { background: var(--warn-soft); }
+.map-select { width: 100%; padding: 4px 8px; }
+.import-done { align-items: center; padding: var(--s5) 0 var(--s2); }
+.done-icon {
+  width: 52px; height: 52px; border-radius: 50%; font-size: 24px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; margin-bottom: var(--s3);
+}
+.done-icon.ok { background: var(--ok-soft); color: var(--ok); }
+.done-icon.warn { background: var(--warn-soft); color: var(--warn); }
+.done-title { font-size: var(--t-lg); font-weight: 600; margin-bottom: var(--s1); color: var(--ink-950); }
+.done-stats { margin-bottom: var(--s4); color: var(--ink-600); }
+.loading-hint {
+  color: var(--ink-500); padding: var(--s5) 0; text-align: center; font-size: var(--t-sm);
+}
+.loading-hint::after {
+  content: ""; display: inline-block; width: 14px; height: 14px; margin-left: 8px;
+  vertical-align: -2px; border: 2px solid var(--line-2); border-top-color: var(--primary);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- 明细表（开票 / 回款 / 附件） ---------- */
+.invoice-summary {
+  display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+  margin-bottom: var(--s3);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r2);
+  padding: var(--s2) var(--s3);
+}
+.invoice-summary .muted { font-size: var(--t-xs); }
+.invoice-table th, .invoice-table td {
+  padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left;
+}
+.invoice-table thead th {
+  background: var(--thead-bg); font-size: var(--t-xs); color: var(--ink-600); font-weight: 600;
+}
+.invoice-table tbody tr:hover td { background: var(--row-hover); }
+.invoice-table tbody tr:last-child td { border-bottom: none; }
+.invoice-table { font-variant-numeric: tabular-nums; }
+.invoice-add { display: flex; gap: var(--s2); margin-top: var(--s3); flex-wrap: wrap; align-items: center; }
+.att-table td, .att-table th { vertical-align: middle; }
+
+/* 附件上传 */
+.att-upload { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin-bottom: var(--s3); }
+.att-progress {
+  flex-basis: 100%; height: 5px; background: var(--surface-3);
+  border-radius: var(--r-pill); overflow: hidden;
+}
+.att-progress-bar {
+  height: 100%; width: 0; background: var(--primary); border-radius: var(--r-pill);
+  transition: width var(--dur) var(--ease);
+}
+.att-has { color: var(--primary); font-weight: 500; }
+
+/* ---------- 导出汇总表弹窗 ---------- */
+.exp-scope {
+  display: flex; gap: var(--s5); flex-wrap: wrap; align-items: center;
+  font-size: var(--t-sm); color: var(--ink-600);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r2);
+  padding: var(--s3); margin-bottom: var(--s3);
+}
+.exp-scope label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.exp-scope input { accent-color: var(--primary); cursor: pointer; }
+.exp-total-row {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--t-sm); color: var(--ink-600);
+  margin: var(--s2) 0; cursor: pointer; line-height: 1.7;
+}
+.exp-total-row input { accent-color: var(--primary); cursor: pointer; flex-shrink: 0; }
+.exp-total-row:hover { color: var(--primary); }
+.exp-fields-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3);
+  margin: var(--s4) 0 var(--s2); padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-sm); font-weight: 600; color: var(--ink-950);
+}
+.exp-fields-ops { font-size: var(--t-xs); font-weight: 400; color: var(--ink-500); }
+.exp-fields-ops a { margin: 0 2px; }
+.exp-fields {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 2px var(--s3); max-height: 300px; overflow-y: auto;
+  padding: var(--s1) 0;
+}
+.exp-field {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 4px; border-radius: var(--r1);
+  font-size: var(--t-sm); color: var(--ink-700); cursor: pointer;
+  transition: background var(--dur-f) var(--ease), color var(--dur-f) var(--ease);
+}
+.exp-field:hover { background: var(--surface-2); color: var(--primary); }
+.exp-field input { accent-color: var(--primary); cursor: pointer; flex-shrink: 0; }
+
+/* ---------- 选项管理 ---------- */
+.dict-add-row { display: flex; gap: var(--s2); margin-top: var(--s4); flex-wrap: wrap; }
+.dict-add-row .ipt { width: auto; }
+.dict-item { font-variant-numeric: tabular-nums; }
+
+/* 勾选框统一配色 */
+.row-check, .perm-toggle input, .cp-item input { accent-color: var(--primary); cursor: pointer; }
+
+/* ---------- 明细批量导入 ---------- */
+.di-entry {
+  margin-top: var(--s3); font-size: var(--t-sm); color: var(--ink-600);
+  background: var(--surface-2); border: 1px dashed var(--line-2); border-radius: var(--r2);
+  padding: var(--s2) var(--s3);
+}
+.di-entry a { color: var(--primary); cursor: pointer; font-weight: 600; }
+.di-unmatched {
+  margin: var(--s2) 0; font-size: var(--t-xs);
+  color: oklch(42% 0.10 66); background: var(--warn-soft);
+  border: 1px solid var(--warn-line); border-radius: var(--r2);
+  padding: 6px 10px; word-break: break-all; line-height: 1.7;
+}
+
+/* ---------- 引导 / 设置 ---------- */
+.guide-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2);
+  padding: var(--s5) var(--s5) var(--s4); box-shadow: var(--sh1);
+}
+.guide-steps { padding-left: var(--s5); line-height: 2; margin-bottom: var(--s4); color: var(--ink-600); }
+.guide-steps li::marker { color: var(--ink-400); font-variant-numeric: tabular-nums; }
+.guide-steps b { color: var(--ink-950); }
+.settings-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2);
+  padding: var(--s5); box-shadow: var(--sh1); max-width: 540px;
+  display: flex; flex-direction: column; gap: var(--s4);
+}
+/* 设置页：信息卡网格 + 键值行 */
+.settings-grid {
+  display: grid; gap: var(--s4); align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.settings-grid .settings-card { max-width: none; gap: var(--s3); }
+.set-title {
+  font-size: var(--t-base); font-weight: 600; color: var(--ink-950);
+  padding-bottom: var(--s2); border-bottom: 1px solid var(--line);
+}
+.set-list { display: flex; flex-direction: column; }
+.set-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: var(--s4); padding: 7px 0; border-bottom: 1px dashed var(--line);
+  font-size: var(--t-sm);
+}
+.set-row:last-child { border-bottom: 0; }
+.set-k { color: var(--ink-500); flex: none; }
+.set-v { color: var(--ink-950); font-weight: 500; text-align: right; word-break: break-all; }
+.set-hint { font-size: var(--t-xs); color: var(--ink-500); line-height: 1.8; margin: 0; }
+
+/* 用户管理：权限表读取异常的可视化提示（避免静默显示成"没有权限"） */
+.admin-warn {
+  margin-bottom: var(--s3); padding: 10px var(--s3);
+  font-size: var(--t-xs); line-height: 1.7; word-break: break-all;
+  color: oklch(42% 0.10 66); background: var(--warn-soft);
+  border: 1px solid var(--warn-line); border-radius: var(--r2);
+}
+
+/* ---------- 用户 / 批次管理表格 ---------- */
+.batch-table th, .batch-table td, .admin-table th, .admin-table td {
+  padding: 8px var(--s3); border-bottom: 1px solid var(--line); text-align: left;
+}
+.batch-table thead th, .admin-table thead th {
+  background: var(--thead-bg); font-size: var(--t-xs); color: var(--ink-600);
+  font-weight: 600; position: sticky; top: 0; z-index: 5;
+  border-bottom: 1px solid var(--line-2);
+}
+.batch-table tbody tr, .admin-table tbody tr { --row-bg: var(--surface); }
+.batch-table tbody tr:nth-child(even), .admin-table tbody tr:nth-child(even) { --row-bg: var(--row-alt); }
+/* 行悬浮必须落在 td 上——td 自带不透明底色，染 tr 是看不见的 */
+.batch-table tbody tr:hover td, .admin-table tbody tr:hover td { background: var(--row-hover); }
+.batch-table tbody td, .admin-table tbody td { background: var(--row-bg); vertical-align: middle; }
+
+/* 用户表：固定列宽（列宽写死在 colgroup 上，表头与表体永不漂移） */
+.admin-table { table-layout: fixed; }
+/* 横向内边距收到 8px：与台账主表一致，也给「台账权限」列腾出勾选网格的宽度 */
+.admin-table th, .admin-table td { padding-left: 8px; padding-right: 8px; }
+.admin-table col.c-user  { width: 168px; }
+.admin-table col.c-mail  { width: 156px; }
+.admin-table col.c-dept  { width: 120px; }
+.admin-table col.c-phone { width: 108px; }
+.admin-table col.c-role  { width: 100px; }
+.admin-table col.c-act   { width: 104px; }
+/* 单行省略：固定布局下超长内容会压到邻列，必须裁掉 */
+.admin-table td.cell-ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.admin-table td.cell-name { white-space: normal; line-height: 1.45; }
+.admin-table tbody td:last-child a + a { margin-left: 12px; }
+/* 受保护的主管理员：整行染色会在单元格之间断成色块，改用首列一道竖标记 */
+.admin-table tbody tr.row-admin td:first-child { box-shadow: inset 2px 0 0 var(--primary-line); }
+
+/* 台账权限列：CSS Grid 对齐（绝不可给 td 直接 display:flex，会退出表格布局） */
+.perm-cell {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 3px 10px; align-items: center;
+}
+.perm-toggle {
+  display: inline-flex; align-items: center; gap: 4px; min-width: 0;
+  font-size: var(--t-xs); color: var(--ink-600); cursor: pointer; white-space: nowrap;
+}
+.perm-toggle:hover { color: var(--primary); }
+.perm-toggle input { accent-color: var(--primary); cursor: pointer; flex-shrink: 0; }
+.perm-foot {
+  grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s2); margin-top: 2px; padding-top: 5px; border-top: 1px dashed var(--line);
+}
+.perm-state { font-size: 11.5px; color: var(--ink-500); }
+.perm-cell.is-dirty .perm-state { color: var(--warn); font-weight: 500; }
+.perm-save {
+  font-family: var(--font); font-size: var(--t-xs); line-height: 1; padding: 4px 10px;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-600);
+  border-radius: var(--r1); cursor: pointer;
+  transition: border-color var(--dur-f) var(--ease), color var(--dur-f) var(--ease),
+              background var(--dur-f) var(--ease);
+}
+.perm-save:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.perm-cell.is-dirty .perm-save { background: var(--primary); border-color: var(--primary); color: var(--surface); }
+.perm-cell.is-dirty .perm-save:hover:not(:disabled) { background: var(--primary-600); color: var(--surface); }
+.perm-save:disabled { opacity: 0.5; cursor: default; }
+.perm-full { font-size: var(--t-xs); color: var(--ink-500); }
+.act-none { font-size: var(--t-xs); color: var(--ink-400); }
+.lock-chip {
+  display: inline-block; padding: 0 6px; border-radius: var(--r-pill);
+  font-size: 11px; line-height: 1.6; color: var(--ink-500);
+  background: var(--surface-3); border: 1px solid var(--line);
+}
+
+/* 密码强度条 */
+.pwd-meter { height: 5px; background: var(--surface-3); border-radius: var(--r-pill); overflow: hidden; margin-top: var(--s2); }
+.pwd-meter-bar { height: 100%; width: 0; background: var(--line-2); border-radius: var(--r-pill); transition: width var(--dur) var(--ease), background var(--dur) var(--ease); }
+.pwd-hint { font-size: 11.5px; color: var(--ink-500); margin-top: var(--s1); min-height: 16px; }
+.pwd-hint.ok { color: var(--ok); }
+
+/* ---------- 部门管理（卡片网格） ---------- */
+.dept-panel {
+  margin-top: var(--s4); background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r2); box-shadow: var(--sh1); padding: var(--s4) var(--s4) var(--s5);
+}
+.dept-panel-head {
+  display: flex; justify-content: space-between; align-items: flex-end; gap: var(--s4);
+  flex-wrap: wrap; margin-bottom: var(--s4); padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--line);
+}
+.dph-title { font-size: var(--t-base); font-weight: 600; color: var(--ink-950); margin-bottom: 3px; }
+.dph-sub { font-size: var(--t-xs); color: var(--ink-500); line-height: 1.7; }
+.dept-add { display: flex; gap: var(--s2); }
+.dept-add .ipt { width: 210px; }
+
+.dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: var(--s2); }
+.dept-card {
+  position: relative; border: 1px solid var(--line); border-radius: var(--r2);
+  padding: 10px var(--s3); background: var(--surface);
+  min-height: 62px; display: flex; flex-direction: column; justify-content: space-between; gap: 6px;
+  transition: border-color var(--dur-f) var(--ease), background var(--dur-f) var(--ease),
+              box-shadow var(--dur-f) var(--ease);
+}
+.dept-card:hover {
+  border-color: var(--primary); background: var(--surface);
+  box-shadow: 0 2px 10px oklch(45% 0.13 258 / 0.10);
+}
+.dc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s2); }
+.dc-name {
+  font-size: var(--t-sm); font-weight: 600; color: var(--ink-950); line-height: 1.45;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dc-count {
+  flex-shrink: 0; min-width: 24px; text-align: center; font-size: 11.5px;
+  color: var(--primary); background: var(--primary-soft);
+  border: 1px solid var(--primary-line);
+  border-radius: var(--r-pill); padding: 0 7px; font-variant-numeric: tabular-nums;
+}
+.dc-count.zero { color: var(--ink-500); background: var(--surface-3); border-color: var(--line); }
+.dc-acts {
+  display: flex; gap: var(--s1); justify-content: flex-end;
+  opacity: 0; transition: opacity var(--dur-f) var(--ease);
+}
+.dept-card:hover .dc-acts, .dept-card:focus-within .dc-acts { opacity: 1; }
+.dc-btn {
+  min-width: 34px; height: 22px; padding: 0 6px;
+  border: 1px solid var(--line); background: var(--surface);
+  border-radius: var(--r1); font-size: 11.5px; line-height: 1; color: var(--ink-600);
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font);
+  transition: border-color var(--dur-f) var(--ease), color var(--dur-f) var(--ease),
+              background var(--dur-f) var(--ease);
+}
+.dc-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.dc-btn.danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+.dc-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.dept-empty {
+  grid-column: 1 / -1; text-align: center; color: var(--ink-500); font-size: var(--t-sm);
+  padding: var(--s5) 0; border: 1px dashed var(--line-2); border-radius: var(--r2);
+  background: var(--surface-2);
+}
+
+/* 旧版纯文本部门芯片（保留兼容） */
+.dept-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border: 1px solid var(--line); border-radius: var(--r-pill);
+  background: var(--surface); font-size: var(--t-xs); color: var(--ink-700);
+}
+.dept-chip a { font-size: 11px; }
+
+/* ---------- 列设置面板（按账号保存） ---------- */
+.col-panel {
+  position: absolute; z-index: 60; width: 272px; background: var(--surface);
+  border: 1px solid var(--line-2); border-radius: var(--r3);
+  box-shadow: var(--sh2); overflow: hidden;
+}
+.cp-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--s2);
+  padding: 9px var(--s3); border-bottom: 1px solid var(--line);
+  font-size: var(--t-sm); font-weight: 600; color: var(--ink-950); background: var(--surface-2);
+}
+.cp-tip { font-size: 11.5px; color: var(--ink-500); font-weight: 400; }
+.cp-list { max-height: 320px; overflow-y: auto; padding: var(--s2) var(--s3); }
+.cp-item {
+  display: flex; align-items: center; gap: 7px; padding: 3.5px 0;
+  font-size: var(--t-sm); color: var(--ink-700); cursor: pointer; white-space: nowrap;
+}
+.cp-item:hover { color: var(--primary); }
+.cp-item input { accent-color: var(--primary); cursor: pointer; }
+.cp-foot {
+  display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--line); background: var(--surface-2); font-size: var(--t-xs);
+}
+.cp-foot a { font-size: var(--t-xs); }
+.cp-dbstate { margin-left: auto; color: var(--ok); font-size: 11.5px; }
+.cp-dbstate.warn { color: var(--warn); }
+
+/* ---------- Toast ---------- */
+#toast-box {
+  position: fixed; top: var(--s5); left: 50%; transform: translateX(-50%);
+  z-index: 999; display: flex; flex-direction: column; gap: var(--s2); align-items: center;
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: 9px var(--s4) 9px var(--s3);
+  border-radius: var(--r2); font-size: var(--t-base);
+  background: var(--ink-900); color: var(--ink-100);
+  border: 1px solid oklch(35% 0.02 258);
+  border-left: 3px solid var(--ink-500);
+  box-shadow: var(--sh2);
+  opacity: 0; transform: translateY(-8px);
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  max-width: min(560px, 90vw); line-height: 1.6;
+}
+.toast.show { opacity: 1; transform: none; }
+.toast-info { border-left-color: oklch(68% 0.03 258); }
+.toast-success { border-left-color: oklch(70% 0.14 152); }
+.toast-error { border-left-color: oklch(65% 0.17 28); }
+
+.boot-error { padding: var(--s7); text-align: center; color: var(--danger); font-size: var(--t-base); }
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: oklch(82% 0.012 258); border-radius: var(--r-pill);
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: oklch(70% 0.015 258); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---------- 数据看板 ---------- */
+.dash-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); margin-bottom: var(--s3); }
+.kpi-card {
+  position: relative; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r2); box-shadow: var(--sh1);
+  padding: var(--s4) var(--s4) var(--s3);
+}
+.kpi-card::before {
+  content: ""; position: absolute; left: 0; top: var(--s4); bottom: var(--s4);
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--line-2);
+}
+.kpi-label {
+  font-size: var(--t-xs); color: var(--ink-500); letter-spacing: 0.02em;
+  display: flex; align-items: center; gap: 5px;
+}
+.kpi-value {
+  font-size: var(--t-2xl); font-weight: 600; color: var(--ink-950);
+  margin-top: var(--s2); letter-spacing: -0.02em; line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;            /* 金额数字不折行（折行会破坏 KPI 行基线） */
+}
+.kpi-value .kpi-unit { font-size: var(--t-sm); font-weight: 500; margin-left: 3px; color: var(--ink-500); }
+.kpi-value .kpi-sep { font-size: var(--t-lg); color: var(--ink-300); margin: 0 6px; font-weight: 400; }
+.kpi-sub { font-size: 11.5px; color: var(--ink-500); margin-top: var(--s2); line-height: 1.6; }
+.kpi-blue::before { background: var(--primary); }
+.kpi-blue .kpi-value { color: var(--primary); }
+.kpi-danger::before { background: var(--danger); }
+.kpi-danger .kpi-value { color: var(--danger); }
+
+.dash-grid { display: grid; grid-template-columns: 3fr 2fr; gap: var(--s3); margin-bottom: var(--s3); }
+.dash-grid.even { grid-template-columns: 1fr 1fr; }
+.dash-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r2); box-shadow: var(--sh1); margin-bottom: var(--s3);
+}
+.dash-grid .dash-card { margin-bottom: 0; }
+.dash-card-head {
+  display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap;
+  padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line);
+}
+.dash-card-head h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink-950); }
+.dash-card-head .muted { flex: 1; min-width: 120px; text-align: right; }
+.dash-card-body { padding: var(--s4); }
+/* 图表：SVG 宽度 = 容器实测宽度（缩放比 1，图内文字即设计字号），故此处不再干预尺寸 */
+.dash-card-body svg { display: block; }
+.dash-card-body [data-chart] + [data-chart] { margin-top: var(--s1); }
+.dash-empty-sm {
+  padding: var(--s5) var(--s4); text-align: center; color: var(--ink-500);
+  font-size: var(--t-sm); line-height: 1.9;
+}
+.dash-empty {
+  background: var(--surface); border: 1px dashed var(--line-2); border-radius: var(--r3);
+  padding: var(--s7) var(--s5); text-align: center; font-size: var(--t-base); color: var(--ink-600);
+}
+.dash-legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); margin-top: var(--s3); }
+.dash-legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--t-xs); color: var(--ink-500);
+}
+.dash-legend-item i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.dash-legend-item b { color: var(--ink-950); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dash-table { font-size: var(--t-xs); }
+.dash-table th { position: sticky; top: 0; }
+.dash-table td, .dash-table th { padding: 6px 8px; }
+
+/* 汉堡按钮（仅移动端显示） */
+.menu-btn {
+  display: none; align-items: center; justify-content: center;
+  width: 30px; height: 30px; flex-shrink: 0;
+  border: 1px solid var(--line-2); border-radius: var(--r2);
+  background: var(--surface); font-size: 15px; line-height: 1; cursor: pointer; color: var(--ink-700);
+}
+.menu-btn:hover { border-color: var(--primary); color: var(--primary); }
+.sidebar-mask { display: none; }
+
+/* ==========================================================================
+   ⑤ 响应式
+   ========================================================================== */
+@media (max-width: 1100px) {
+  .dash-kpis { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 900px) {
+  .sidebar { width: 60px; }
+  .side-brand { font-size: 10px; padding: var(--s3) 6px; letter-spacing: 0; text-align: center; }
+  .nav-item { justify-content: center; padding: 9px 0; }
+  .nav-item span:not(.nav-icon) { display: none; }
+  .side-perms { display: none; }
+  .form-grid { grid-template-columns: 1fr; }
+  .dash-grid, .dash-grid.even { grid-template-columns: 1fr; }
+  .table-wrap { max-height: none; }
+}
+@media (max-width: 680px) {
+  .menu-btn { display: inline-flex; }
+  .sidebar {
+    position: fixed; left: 0; top: 0; z-index: 60; width: 210px;
+    transform: translateX(-100%); transition: transform var(--dur) var(--ease);
+  }
+  .sidebar.open { transform: translateX(0); box-shadow: var(--sh3); }
+  .sidebar .nav-item { justify-content: flex-start; padding: 9px var(--s3); }
+  .sidebar .nav-item span:not(.nav-icon) { display: inline; }
+  .sidebar .side-perms { display: block; }
+  .sidebar-mask.show { display: block; position: fixed; inset: 0; background: oklch(21% 0.03 258 / 0.45); z-index: 55; }
+  .topbar { padding: 0 var(--s3); }
+  .topbar-user .user-dept { display: none; }
+  .page-container { padding: var(--s3) var(--s3) var(--s6); }
+  .dash-kpis { grid-template-columns: 1fr; }
+  .toolbar { align-items: stretch; }
+  .kw-input { width: 100%; }
+  .invoice-add { align-items: stretch; }
+  .modal-xl { width: 100vw; }
+  .calc-bar { gap: var(--s3); }
+  /* 小屏不冻结列，避免可用宽度被吃掉 */
+  .ledger-table th.col-check, .ledger-table td.col-check,
+  .ledger-table th.col-idx, .ledger-table td.col-idx,
+  .ledger-table th.col-actions, .ledger-table td.col-actions,
+  .ledger-table tfoot td, .td-foot-label { position: static; box-shadow: none; }
+  #page-ledger .table-wrap { min-height: 0; }
+}
+@media (max-width: 460px) {
+  .topbar-user .user-name { display: none; }
+}
+
+/* ==========================================================================
+   ⑥ 打印（财务常把汇总表打出来或存 PDF）
+   ========================================================================== */
+@media print {
+  @page { margin: 12mm; }
+  body { background: #fff; font-size: 10.5pt; }
+  .sidebar, .sidebar-mask, .topbar, .toolbar, .capsule-row, .menu-btn,
+  .col-check, .col-actions, .table-status, #toast-box, .dash-kpis .kpi-card::before { display: none !important; }
+  .app-shell { display: block; }
+  .page-container { padding: 0; }
+  .hidden { display: none !important; }
+  .table-wrap, .dash-card, .guide-card, .dept-panel {
+    max-height: none !important; overflow: visible !important;
+    border-color: #bbb; box-shadow: none; break-inside: auto;
+  }
+  .ledger-table thead { display: table-header-group; }
+  .ledger-table thead th { position: static; box-shadow: none; background: #f2f4f7; }
+  /* 纸上没有冻结列这回事，全部退回普通流 */
+  .ledger-table th.col-idx, .ledger-table td.col-idx,
+  .ledger-table tfoot td, .td-foot-label { position: static; box-shadow: none; }
+  .ledger-table tbody tr, .dash-table tr { break-inside: avoid; }
+  .ledger-table td, .ledger-table th { border-color: #ccc; }
+  /* 用户表：纸上没有横向滚动，退回自动列宽并允许换行，避免账号/部门被省略号吃掉 */
+  .admin-table { table-layout: auto; }
+  .admin-table td.cell-ell { white-space: normal; overflow: visible; text-overflow: clip; }
+  .ledger-table th.col-check, .ledger-table td.col-check,
+  .ledger-table th.col-idx, .ledger-table td.col-idx { position: static; box-shadow: none; }
+  .td-foot-label { position: static; box-shadow: none; }
+  a { color: inherit; text-decoration: none; }
+}
+
+/* ==========================================================================
+   ⑦ 动效偏好
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* —— 预览页专属，不属于产品样式 —— */
+body { margin: 0; padding: 0; background: var(--surface-2); }
+.preview-note {
+  padding: 7px 18px; font-size: 12px; line-height: 1.7;
+  background: oklch(96% 0.03 258); color: oklch(38% 0.09 258);
+  border-bottom: 1px solid oklch(86% 0.065 258);
+}
+.preview-note b { font-weight: 600; }
+.preview-note code { background: oklch(93% 0.02 258); padding: 1px 4px; border-radius: 3px; }
+/* 与外层真实骨架一致：整页固定一屏（固定高度而非 100vh——无头截图下
+   视口高度不稳定，会让"表格吃掉剩余高度"的版面每次都不同） */
+.preview-shell { height: 900px; min-height: 0; overflow: hidden; }
+.preview-shell .sidebar { height: 100%; }
+.preview-shell .page-container { height: 100%; min-height: 0; }
+</style>
+</head>
+<body>
+<div class="preview-note">
+  <b>台账总览页视觉预览</b> · 模拟台账数据，不连数据库 ·
+  与真实系统同源：<code>css/style.css</code> + <code>js/ledger.js</code> ·
+  <code>#scrolled</code> 横向滚到中间 · <code>#far</code> 滚到最右 · <code>#core</code> 仅常用列 ·
+  <code>#empty</code> 空状态 · <code>#measure</code> 打印几何测量
+</div>
+<div class="app-shell preview-shell">
+  <aside class="sidebar">
+    <div class="side-brand">企业应收账款<br>台账系统</div>
+    <nav class="side-nav">
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">▦</span><span>数据看板</span></button>
+      <button class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true">▤</span><span>台账总览</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">⇪</span><span>Excel 导入</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">☰</span><span>导入批次管理</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">⚿</span><span>用户管理</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">◈</span><span>选项管理</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">⚙</span><span>系统设置</span></button>
+    </nav>
+  </aside>
+  <div class="app-main">
+    <header class="topbar">
+      <div class="topbar-left"><div class="topbar-title">台账总览</div></div>
+      <div class="topbar-user">
+        <span class="user-dept">财务资产部</span><span class="user-name">孙晋宁</span>
+        <button class="btn btn-xs">修改密码</button><button class="btn btn-xs">退出</button>
+      </div>
+    </header>
+    <main class="page-container">
+      <section id="page-ledger" class="page"></section>
+    </main>
+  </div>
+</div>
+<script>/**
+ * fields.js - 台账字段定义（新指标体系 v3，依据《应收系统统计指标.xlsx》28 列）
+ *
+ * 台账表格 / 编辑表单 / Excel 导入映射 / 导出 共用。
+ *
+ * type: text | money | date | select | combo | textarea
+ *   - select: 下拉选择（dict 指定 ar_dict 类别；freeOther=true 时带「其他」自由填写）
+ *   - combo : 可输可选（datalist，dict 选项作建议，允许自由输入）
+ * width: 表格列宽（px）；money/date 列右对齐
+ * aliases: Excel 导入时用于自动匹配的候选表头名
+ * dict: 选项字典类别（ar_dict.category，选项可由财务管理员在「选项管理」页编辑）
+ * deptEditable: 实体部门（非管理员）可编辑（要求五：仅催收跟踪类字段）
+ *
+ * 自动计算口径（要求：账内应收 = 开票金额 − 到账金额；账外应收 = 决算金额 − 开票金额）：
+ *   receivable_internal / receivable_external / receivable_balance 均为虚拟计算列，不入库。
+ *
+ * 旧版字段（合同金额/开工完工日期/工程进度/付款节点/成本费用/应收合计/催收反馈等）
+ * 数据库保留、界面隐藏，需要时可随时恢复。
+ */
+
+const FIELD_DEFS = [
+  /* ---- 基本信息 ---- */
+  { key: 'contract_no',    label: '合同编号',     type: 'text',   width: 110, aliases: ['合同编号', '编号', '合同号'] },
+  { key: 'project_name',   label: '项目名称',     type: 'text',   width: 200, clamp: true, aliases: ['项目名称', '项目', '工程项目'] },
+  { key: 'owner_unit',     label: '客户名称',     type: 'text',   width: 170, aliases: ['客户名称', '甲方单位', '甲方', '建设单位'], datalist: true },
+  { key: 'client_attr',    label: '客户属性',     type: 'select', width: 96,  dict: 'client_attr', freeOther: true, aliases: ['客户属性'] },
+  { key: 'creditor_unit',  label: '单位',         type: 'combo',  width: 130, dict: 'unit', aliases: ['单位', '债权单位', '乙方单位'] },
+  { key: 'work_nature',    label: '工作性质',     type: 'combo',  width: 96,  dict: 'work_nature', aliases: ['工作性质', '性质'] },
+  { key: 'sector',         label: '八大板块',     type: 'combo',  width: 96,  dict: 'sector', aliases: ['八大板块', '板块'] },
+
+  /* ---- 状态与金额 ---- */
+  { key: 'project_status', label: '项目状态',     type: 'select', width: 88,  dict: 'project_status', freeOther: true,
+    deptEditable: true, aliases: ['项目状态', '工程进度'] },
+  { key: 'final_method',   label: '决算方式',     type: 'select', width: 92,  dict: 'final_method', freeOther: true,
+    deptEditable: true, aliases: ['决算方式'] },
+  { key: 'charge_date',    label: '最新挂账时间', type: 'date',   width: 108,
+    aliases: ['最新挂账时间', '挂账时间', '挂账日期'], note: '= 最近一笔开票日期，登记开票明细时自动维护' },
+  { key: 'final_amount',   label: '决算金额',     type: 'money',  width: 92,  aliases: ['决算金额'] },
+  { key: 'invoiced_amount',label: '开票金额',     type: 'money',  width: 92,  aliases: ['开票金额', '已开发票金额'] },
+  { key: 'received_amount',label: '到账金额',     type: 'money',  width: 92,  aliases: ['到账金额', '已到账金额', '已回款'] },
+  { key: 'writeoff_amount',label: '核销金额',     type: 'money',  width: 92,  aliases: ['核销金额', '核销'] },
+
+  /* ---- 债权与催收（实体部门可编辑区） ---- */
+  { key: 'debt_status',    label: '债权状态',     type: 'select', width: 88,  dict: 'debt_status', freeOther: true,
+    deptEditable: true, aliases: ['债权状态'] },
+  { key: 'collector',      label: '清收责任人',   type: 'text',   width: 100,
+    deptEditable: true, aliases: ['清收责任人', '责任人'] },
+  { key: 'dunning_date',   label: '最新催收时间', type: 'date',   width: 108,
+    deptEditable: true, aliases: ['最新催收时间', '催收时间', '催收/询证日期', '催收日期', '询证日期'] },
+  { key: 'comm_method',    label: '沟通方式',     type: 'select', width: 104, dict: 'comm_method', freeOther: true,
+    deptEditable: true, aliases: ['沟通方式'] },
+  { key: 'feedback',       label: '对方反馈',     type: 'select', width: 150, dict: 'feedback', freeOther: true,
+    deptEditable: true, aliases: ['对方反馈', '反馈'] },
+  { key: 'latest_progress',label: '最新进展',     type: 'select', width: 140, dict: 'progress_note', freeOther: true,
+    deptEditable: true, aliases: ['最新进展', '进展'] },
+  { key: 'next_plan',      label: '下一步计划',   type: 'select', width: 130, dict: 'next_plan', freeOther: true,
+    deptEditable: true, aliases: ['下一步计划', '计划'] },
+  { key: 'remark',         label: '备注',         type: 'textarea', width: 150, aliases: ['备注'] },
+];
+
+/* 自动计算列（不对应数据库字段，前端实时计算） */
+const COMPUTED_DEFS = [
+  { key: 'receivable_internal', label: '账内应收金额', type: 'money', width: 102, formula: '= 开票 − 到账' },
+  { key: 'receivable_external', label: '账外应收金额', type: 'money', width: 102, formula: '= 决算 − 开票' },
+  { key: 'receivable_balance',  label: '应收余额',     type: 'money', width: 96,  formula: '= 决算 − 到账 − 核销' },
+  { key: 'attach_summary',      label: '附件类别及数量', type: 'text',  width: 130 },
+];
+
+const ALL_FIELDS = FIELD_DEFS.map(f => f.key);
+
+const MONEY_KEYS = FIELD_DEFS.filter(f => f.type === 'money').map(f => f.key);
+
+/* 编辑表单分组（要求一：一个项目一个界面，按业务分区展示全部要素） */
+const FORM_GROUPS = [
+  { key: 'base',    label: '基本信息', fields: ['contract_no', 'project_name', 'owner_unit', 'client_attr', 'creditor_unit', 'work_nature', 'sector'] },
+  { key: 'finance', label: '状态与金额', fields: ['project_status', 'final_method', 'charge_date', 'final_amount', 'invoiced_amount', 'received_amount', 'writeoff_amount'] },
+  { key: 'dunning', label: '债权与催收', fields: ['debt_status', 'collector', 'dunning_date', 'comm_method', 'feedback', 'latest_progress', 'next_plan', 'remark'] },
+];
+
+/* 字典类别定义（「选项管理」页展示顺序与说明） */
+const DICT_CATEGORIES = [
+  { key: 'project_status',  label: '项目状态' },
+  { key: 'final_method',    label: '决算方式' },
+  { key: 'debt_status',     label: '债权状态' },
+  { key: 'client_attr',     label: '客户属性' },
+  { key: 'comm_method',     label: '沟通方式' },
+  { key: 'feedback',        label: '对方反馈' },
+  { key: 'progress_note',   label: '最新进展' },
+  { key: 'next_plan',       label: '下一步计划' },
+  { key: 'attach_category', label: '附件类别' },
+  { key: 'unit',            label: '单位（债权单位）' },
+  { key: 'work_nature',     label: '工作性质' },
+  { key: 'sector',          label: '八大板块' },
+];
+
+/* 客户名称建议（内置 + 库内历史值自动并入 datalist） */
+const OWNER_UNIT_PRESETS = [
+  '山西省第十地质工程勘察院',
+];
+
+/* 权限定义（左侧权限栏 + 管理员授权页共用） */
+const PERM_DEFS = [
+  { key: 'view',     label: '查看本部门台账' },
+  { key: 'view_all', label: '查看全部台账' },
+  { key: 'add',      label: '新增记录' },
+  { key: 'edit',     label: '编辑记录' },
+  { key: 'delete',   label: '删除记录' },
+  { key: 'import',   label: 'Excel 导入' },
+  { key: 'export',   label: '导出 Excel' },
+];
+
+/* 标签颜色映射（表格中状态列的胶囊配色） */
+const TAG_COLORS = {
+  '完工': 'tag-green', '施工中': 'tag-blue', '中止': 'tag-orange', '取消或作废': 'tag-gray',
+  '正常': 'tag-green', '逾期': 'tag-overdue', '诉讼': 'tag-red', '和解': 'tag-teal',
+};
+</script>
+<script>/**
+ * dict.js - 选项字典模块（要求三：蓝色内置可选项，财务可自行编辑）
+ *
+ * 数据来源：ar_dict 表（财务管理员在「选项管理」页维护）；
+ * 表未建 / 无网络 / 类别为空时自动降级为内置默认选项，功能不受影响。
+ * 编辑表单中的下拉（select/combo）均从这里取值。
+ */
+
+/* 内置默认选项（与 sql/upgrade-v3-indicators.sql 种子一致，作兜底） */
+const DICT_BUILTIN = {
+  project_status:  ['完工', '施工中', '中止', '取消或作废'],
+  final_method:    ['合同金额', '工作量'],
+  debt_status:     ['正常', '逾期', '诉讼', '和解'],
+  client_attr:     ['内部单位', '政府部门--省', '政府部门--市', '政府部门--县', '政府部门--县以下',
+                   '煤矿集团--晋能控股', '煤矿集团--山西焦煤', '煤矿集团--潞安化工', '煤矿集团--华阳新材',
+                   '煤矿集团--华新燃气', '煤矿集团--其他煤矿', '社会客户-省内', '社会客户-省外',
+                   '社会客户-海外', '其他'],
+  unit:            ['物化院', '六勘院', '测绘院', '禹地公司'],
+  work_nature:     ['二、三维地震', '宅基地', '农经权', '房地一体', '其他测绘', '工民建勘察',
+                   '报告编写、设计方案', '政府性灾害勘察', '地灾评估、勘察、设计', '市场地质', '价款项目',
+                   '综合物探', '基础施工', '灾害施工', '生态修复', '化验、基础检测', '土工试验', '其他'],
+  sector:          ['能源资源勘查开发', '生态保护修复', '地质灾害治理', '工程勘察与施工',
+                   '地质延伸产业', '实验测试', '测绘地理信息', '海外勘查贸易'],
+  comm_method:     ['电话', '上门拜访', '邮件', '微信', '函件+电话', '函件+微信'],
+  feedback:        ['承认欠款，但资金紧张', '拒接电话', '对质量提出异议', '正在筹款，近期付',
+                   '工程量结算有争议', '承认欠款，要求分期'],
+  progress_note:   ['已发送第二次催款函', '停工', '需协商', '已安排对账', '对方提出分期', '移交法务部'],
+  next_plan:       ['升级催收手段', '需实地调查', '需核实情况', '跟踪付款进度', '申请财产保全', '提供分期计划'],
+  attach_category: ['决算', '中止证明', '其他'],
+};
+
+const Dicts = {
+
+  cache: {},        // category -> [value, ...]（仅存 ar_dict 中实际存在的）
+  dbOk: false,      // ar_dict 表是否可用
+
+  /** 登录后调用：加载全部字典 */
+  async load() {
+    this.cache = {};
+    this.dbOk = false;
+    try {
+      const { data, error } = await sb.from('ar_dict')
+        .select('category, value').order('category').order('sort_order').limit(2000);
+      if (!error && data) {
+        this.dbOk = true;
+        data.forEach(d => {
+          (this.cache[d.category] = this.cache[d.category] || []).push(d.value);
+        });
+      }
+    } catch (e) { /* 表未建等情况，静默降级 */ }
+  },
+
+  /** 某类别的选项列表（数据库优先，空则用内置默认） */
+  get(category) {
+    const list = this.cache[category];
+    if (list && list.length) return list;
+    return DICT_BUILTIN[category] || [];
+  },
+
+  /** 类别是否在数据库中有维护（「选项管理」页区分内置/自定义） */
+  isManaged(category) {
+    return !!(this.cache[category] && this.cache[category].length);
+  },
+};
+</script>
+<script>/**
+ * colprefs.js - 台账列显示偏好（**按登录账号独立保存**，互不影响）
+ *
+ * 存储优先级：
+ *   1. 数据库表 ar_user_prefs（每个账号一行，换电脑/换浏览器都跟随账号）
+ *   2. localStorage（key 带用户 id，作为断网/未建表时的兜底，同样按账号隔离）
+ *
+ * 数据库表未建立时不会报错，自动降级为本地存储，功能照常可用。
+ */
+
+const ColPrefs = {
+
+  hidden: new Set(),      // 被隐藏的字段 key 集合
+  userId: null,
+  dbOk: false,
+
+  /** 全部可显示列（台账字段 + 自动计算列） */
+  allDefs() { return [...FIELD_DEFS, ...COMPUTED_DEFS]; },
+
+  /** 常用列（一键精简，新指标体系核心 14 列） */
+  coreKeys() {
+    return ['contract_no', 'project_name', 'owner_unit', 'project_status',
+      'final_amount', 'invoiced_amount', 'received_amount', 'writeoff_amount',
+      'receivable_internal', 'receivable_external', 'receivable_balance',
+      'debt_status', 'collector', 'dunning_date'];
+  },
+
+  lsKey() { return 'ar_colprefs_' + (this.userId || 'anon'); },
+
+  /** 登录成功后调用 */
+  async load(userId) {
+    this.userId = userId;
+    this.hidden = new Set();
+    try {
+      const raw = localStorage.getItem(this.lsKey());
+      if (raw) this.hidden = new Set(JSON.parse(raw));
+    } catch (e) { /* 忽略本地读取失败 */ }
+
+    try {
+      const { data, error } = await sb
+        .from('ar_user_prefs').select('prefs').eq('user_id', userId).maybeSingle();
+      if (error) {
+        this.dbOk = false;                     // 表未建立 → 仅用本地存储
+      } else {
+        this.dbOk = true;
+        if (data && data.prefs && Array.isArray(data.prefs.hidden_cols)) {
+          this.hidden = new Set(data.prefs.hidden_cols);
+          this.saveLocal();
+        }
+      }
+    } catch (e) {
+      this.dbOk = false;
+    }
+  },
+
+  isVisible(key) { return !this.hidden.has(key); },
+  hiddenCount() { return this.hidden.size; },
+
+  saveLocal() {
+    try { localStorage.setItem(this.lsKey(), JSON.stringify([...this.hidden])); } catch (e) { /* 忽略 */ }
+  },
+
+  /** 保存到服务器（失败则仅本地生效） */
+  async save() {
+    this.saveLocal();
+    if (!this.userId) return;
+    try {
+      const { error } = await sb.from('ar_user_prefs').upsert(
+        { user_id: this.userId, prefs: { hidden_cols: [...this.hidden] }, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' });
+      if (error) this.dbOk = false;
+    } catch (e) { this.dbOk = false; }
+  },
+
+  async toggle(key) {
+    if (this.hidden.has(key)) this.hidden.delete(key); else this.hidden.add(key);
+    await this.save();
+  },
+
+  async showAll() { this.hidden = new Set(); await this.save(); },
+  async onlyCore() {
+    this.hidden = new Set(this.allDefs().map(f => f.key).filter(k => !this.coreKeys().includes(k)));
+    await this.save();
+  },
+
+  /* ================= 列设置面板 ================= */
+
+  /**
+   * 打开列设置下拉面板
+   * @param {HTMLElement} anchor 触发按钮
+   * @param {Function} onChange 每次勾选变化后回调（重绘表格）
+   */
+  openPanel(anchor, onChange) {
+    this.closePanel();
+    const defs = this.allDefs();
+    const el = document.createElement('div');
+    el.id = 'col-panel';
+    el.className = 'col-panel';
+    el.innerHTML = `
+      <div class="cp-head">
+        <span>显示列（${defs.length - this.hidden.size}/${defs.length}）</span>
+        <span class="cp-tip">设置仅对当前账号生效</span>
+      </div>
+      <div class="cp-list">
+        ${defs.map(f => `
+          <label class="cp-item">
+            <input type="checkbox" data-key="${f.key}" ${this.isVisible(f.key) ? 'checked' : ''}>
+            <span>${f.label}</span>
+          </label>`).join('')}
+      </div>
+      <div class="cp-foot">
+        <a data-act="all">全部显示</a>
+        <a data-act="core">仅常用列</a>
+        <span class="cp-dbstate ${this.dbOk ? '' : 'warn'}">${this.dbOk ? '已保存到账号' : '仅本台生效'}</span>
+      </div>`;
+    document.body.appendChild(el);
+
+    // 定位：贴着按钮下方，避免溢出右边界
+    const r = anchor.getBoundingClientRect();
+    const w = el.offsetWidth || 260;
+    el.style.top = (r.bottom + 6 + window.scrollY) + 'px';
+    el.style.left = Math.max(8, Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - w - 12)) + 'px';
+
+    el.querySelectorAll('input[data-key]').forEach(cb => cb.addEventListener('change', async () => {
+      await this.toggle(cb.dataset.key);
+      el.querySelector('.cp-head span').textContent =
+        `显示列（${defs.length - this.hidden.size}/${defs.length}）`;
+      onChange && onChange();
+    }));
+
+    el.querySelector('[data-act="all"]').addEventListener('click', async () => {
+      await this.showAll(); this.closePanel(); onChange && onChange();
+      anchor.click && anchor.click();
+    });
+    el.querySelector('[data-act="core"]').addEventListener('click', async () => {
+      await this.onlyCore(); this.closePanel(); onChange && onChange();
+      anchor.click && anchor.click();
+    });
+
+    setTimeout(() => {
+      document.addEventListener('mousedown', this._outsideHandler = e => {
+        if (!el.contains(e.target) && e.target !== anchor) this.closePanel();
+      });
+      document.addEventListener('keydown', this._escHandler = e => {
+        if (e.key === 'Escape') this.closePanel();
+      });
+    }, 0);
+  },
+
+  closePanel() {
+    const el = document.getElementById('col-panel');
+    if (el) el.remove();
+    if (this._outsideHandler) { document.removeEventListener('mousedown', this._outsideHandler); this._outsideHandler = null; }
+    if (this._escHandler) { document.removeEventListener('keydown', this._escHandler); this._escHandler = null; }
+  },
+};
+</script>
+<script>/**
+ * utils.js - 通用工具（格式化 / DOM / 提示 / 确认框 / 防抖）
+ */
+
+const Utils = {
+
+  /** HTML 转义 */
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
+  /** 金额格式化：千分位，最多 2 位小数（整数不带小数点） */
+  fmtMoney(v) {
+    if (v === null || v === undefined || v === '') return '';
+    const n = Number(v);
+    if (!isFinite(n)) return String(v);
+    const fixed = Math.abs(n) >= 1000 ? n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : String(Math.round(n * 100) / 100);
+    return fixed;
+  },
+
+  /** 解析金额输入/Excel 单元格（支持千分位、字符串） */
+  parseMoney(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    const s = String(v).replace(/[,\s￥¥]/g, '').replace(/[（）()]/g, m => m === '（' || m === '(' ? '-' : '');
+    const n = Number(s);
+    return isFinite(n) && s !== '' ? n : null;
+  },
+
+  /** 日期格式化 YYYY-MM-DD */
+  fmtDate(v) {
+    if (!v) return '';
+    if (typeof v === 'string') {
+      const m = v.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})/);
+      if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+      const d = new Date(v);
+      return isNaN(d) ? v.slice(0, 10) : d.toISOString().slice(0, 10);
+    }
+    return '';
+  },
+
+  /**
+   * Excel 日期值 -> YYYY-MM-DD
+   * SheetJS cellDates 模式给 Date 对象；数字为 Excel 序列号
+   */
+  parseExcelDate(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (v instanceof Date && !isNaN(v)) {
+      return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+    }
+    if (typeof v === 'number' && v > 20000 && v < 80000) {
+      // Excel 序列号（1900 日期系统）
+      const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return d.toISOString().slice(0, 10);
+    }
+    const s = String(v).trim();
+    if (!s) return null;
+    const m = s.match(/^(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})日?$/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+    const d = new Date(s);
+    if (!isNaN(d) && d.getFullYear() > 1990) return d.toISOString().slice(0, 10);
+    return null;
+  },
+
+  /**
+   * 项目名称等长文本截断：≤3 行 × 每行 12 个汉字，超出以 … 结尾
+   */
+  clampName(str, maxLine = 12, maxLineCount = 3) {
+    const s = String(str || '');
+    if (!s) return '';
+    const limit = maxLine * maxLineCount;
+    if (s.length <= limit) return s;
+    return s.slice(0, limit) + '…';
+  },
+
+  /** 防抖 */
+  debounce(fn, wait = 300) {
+    let t = null;
+    return function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
+  },
+
+  /** 轻提示 */
+  toast(msg, type = 'info') {
+    let box = document.getElementById('toast-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'toast-box';
+      document.body.appendChild(box);
+    }
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    box.appendChild(el);
+    setTimeout(() => { el.classList.add('show'); }, 10);
+    setTimeout(() => {
+      el.classList.remove('show');
+      setTimeout(() => el.remove(), 300);
+    }, type === 'error' ? 4200 : 2600);
+  },
+
+  /**
+   * 确认框（Promise<boolean>）
+   * @param {string} message 支持 \n 换行
+   * @param {object} opts { title, danger, confirmText }
+   */
+  confirm(message, opts = {}) {
+    return new Promise(resolve => {
+      const old = document.getElementById('modal-confirm');
+      if (old) old.remove();
+      const el = document.createElement('div');
+      el.id = 'modal-confirm';
+      el.className = 'modal-mask';
+      el.innerHTML = `
+        <div class="modal modal-sm">
+          <div class="modal-header">${Utils.escapeHtml(opts.title || '请确认')}</div>
+          <div class="modal-body confirm-msg">${Utils.escapeHtml(message).replace(/\n/g, '<br>')}</div>
+          <div class="modal-footer">
+            <button class="btn" data-act="cancel">取消</button>
+            <button class="btn ${opts.danger ? 'btn-danger' : 'btn-primary'}" data-act="ok">${Utils.escapeHtml(opts.confirmText || '确定')}</button>
+          </div>
+        </div>`;
+      document.body.appendChild(el);
+      let sx = 0, sy = 0;
+      el.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
+      el.addEventListener('click', e => {
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+        if (e.target === el || e.target.closest('[data-act="cancel"]')) { el.remove(); resolve(false); }
+        else if (e.target.closest('[data-act="ok"]')) { el.remove(); resolve(true); }
+      });
+    });
+  },
+
+  /**
+   * 弹窗遮罩点击关闭（带拖拽误触保护：按下滑动超 6px 不关闭）
+   * @param {HTMLElement} mask 遮罩元素
+   * @param {Function} onClose 点击遮罩关闭时回调
+   */
+  bindMaskClose(mask, onClose) {
+    let sx = 0, sy = 0;
+    mask.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
+    mask.addEventListener('click', e => {
+      if (e.target !== mask) return;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+      onClose();
+    });
+  },
+
+  /** 密码强度评分（0-5）：长度≥8 / 大写 / 小写 / 数字 / 符号 各计 1 分 */
+  pwdScore(v) {
+    if (!v) return 0;
+    let s = 0;
+    if (v.length >= 8) s++;
+    if (/[A-Z]/.test(v)) s++;
+    if (/[a-z]/.test(v)) s++;
+    if (/[0-9]/.test(v)) s++;
+    if (/[^A-Za-z0-9]/.test(v)) s++;
+    return s;
+  },
+
+  /** 密码是否符合强密码规则（≥8 位 + 四类字符） */
+  pwdValid(v) { return this.pwdScore(v) >= 5; },
+
+  /** 给密码输入框绑定实时强度进度条（bar 进度条元素，hint 提示元素） */
+  bindPwdMeter(input, bar, hint) {
+    /* 色阶与设计令牌同源（oklch → sRGB）：灰 → 朱砂 → 琥珀 → 橄榄 → 绿 */
+    const colors = ['#e0e3e8', '#a74639', '#975800', '#756c00', '#53760e', '#137d41'];
+    const update = () => {
+      const v = input.value;
+      const s = this.pwdScore(v);
+      const ok = this.pwdValid(v);
+      bar.style.width = (v ? Math.max(s / 5 * 100, 8) : 0) + '%';
+      bar.style.background = v ? colors[s] : colors[0];
+      if (!v) {
+        hint.textContent = '至少 8 位，须同时包含大写字母、小写字母、数字和符号';
+        hint.classList.remove('ok');
+        return;
+      }
+      const missing = [];
+      if (v.length < 8) missing.push('至少 8 位');
+      if (!/[A-Z]/.test(v)) missing.push('大写字母');
+      if (!/[a-z]/.test(v)) missing.push('小写字母');
+      if (!/[0-9]/.test(v)) missing.push('数字');
+      if (!/[^A-Za-z0-9]/.test(v)) missing.push('符号');
+      hint.textContent = ok ? '✓ 密码强度合格' : '还缺：' + missing.join('、');
+      hint.classList.toggle('ok', ok);
+    };
+    input.addEventListener('input', update);
+    update();
+  },
+
+  /** 计算两个日期相差天数（b - a） */
+  daysBetween(a, b) {
+    if (!a || !b) return null;
+    const da = new Date(a + 'T00:00:00'), db = new Date(b + 'T00:00:00');
+    if (isNaN(da) || isNaN(db)) return null;
+    return Math.round((db - da) / 86400000);
+  },
+
+  /** 今天 YYYY-MM-DD */
+  today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  },
+
+  /**
+   * 说明（2026-09-15）：原 `overdueStatus()`（按完工日期 + 预警天数自动判定超期）
+   * 已删除。它引用的 receivable_total / end_date 是 v3 已废弃字段，且按
+   * CONTEXT.md / ADR-0002 的结论——本院"按合同期限几乎全部逾期"、自动判定无区分度，
+   * 债权状态改为人工维护（「债权状态」下拉）。系统不做自动逾期判定。
+   */
+};
+</script>
+<script>/**
+ * attachments.js - 附件上传区（要求四）
+ *
+ * 每条台账记录可上传多个附件（类别：决算 / 中止证明 / 其他，类别走选项字典）。
+ * 文件存 Supabase Storage 私有桶 ar-attachments，路径 {ledger_id}/{uuid}.{ext}；
+ * 元数据存 ar_attachments 表（RLS 跟随台账行可见性）。
+ * 下载通过签名 URL（1 小时有效）；「附件类别及数量」列由本模块汇总自动生成。
+ */
+
+const Attachments = {
+
+  BUCKET: 'ar-attachments',
+  MAX_SIZE: 50 * 1024 * 1024,   // 单文件 50MB
+  rows: [],                     // 当前行附件 [{id, category, file_name, file_size, storage_path, ...}]
+
+  /** 全量附件计数（Ledger.load 后调用，供表格「附件类别及数量」列使用） */
+  countMap: {},                 // ledger_id -> { 类别: 数量 }
+
+  /** 拉取全部可见附件的计数（RLS 已按台账行可见性隔离） */
+  async loadCounts() {
+    this.countMap = {};
+    try {
+      const { data, error } = await sb.from('ar_attachments')
+        .select('ledger_id, category').limit(20000);
+      if (error) return;
+      (data || []).forEach(a => {
+        const m = (this.countMap[a.ledger_id] = this.countMap[a.ledger_id] || {});
+        const c = a.category || '其他';
+        m[c] = (m[c] || 0) + 1;
+      });
+    } catch (e) { /* 静默 */ }
+  },
+
+  /** 表格「附件类别及数量」文本，如「决算×2、中止证明×1」 */
+  summaryText(ledgerId) {
+    const m = this.countMap[ledgerId];
+    if (!m) return '';
+    return Object.entries(m).map(([k, v]) => `${k}×${v}`).join('、');
+  },
+
+  /** 附件总数徽标 */
+  count(ledgerId) {
+    const m = this.countMap[ledgerId];
+    return m ? Object.values(m).reduce((s, v) => s + v, 0) : 0;
+  },
+
+  /* ================= 编辑弹窗内的附件区 ================= */
+
+  async loadFor(ledgerId) {
+    this.rows = [];
+    if (!ledgerId) return;
+    const { data, error } = await sb.from('ar_attachments')
+      .select('*').eq('ledger_id', ledgerId).order('created_at', { ascending: false });
+    if (!error) this.rows = data || [];
+  },
+
+  fmtSize(n) {
+    if (!n && n !== 0) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+    return (n / 1024 / 1024).toFixed(1) + ' MB';
+  },
+
+  /** 渲染附件区（编辑弹窗内）。canEdit：是否可上传/删除（实体部门对附件有权限） */
+  render(canEdit) {
+    const cats = Dicts.get('attach_category');
+    const catOptions = cats.map(c => `<option value="${Utils.escapeHtml(c)}">${Utils.escapeHtml(c)}</option>`).join('');
+    const list = this.rows.map(a => `
+      <tr data-att-id="${a.id}" data-att-path="${Utils.escapeHtml(a.storage_path)}">
+        <td style="width:92px"><span class="tag tag-teal">${Utils.escapeHtml(a.category || '其他')}</span></td>
+        <td title="${Utils.escapeHtml(a.file_name)}">${Utils.escapeHtml(a.file_name)}</td>
+        <td class="ta-r muted" style="width:80px">${this.fmtSize(a.file_size)}</td>
+        <td style="width:120px">${Utils.escapeHtml((a.created_at || '').slice(0, 10))}</td>
+        <td style="width:110px">
+          <a data-att="dl">下载</a>
+          ${canEdit ? '<a class="link-danger" data-att="del">删除</a>' : ''}
+        </td>
+      </tr>`).join('') || '<tr><td colspan="5" class="empty-cell">暂无附件<br>决算文件、中止证明等可上传留存，方便日后对账与举证</td></tr>';
+
+    return `
+      ${canEdit ? `
+      <div class="att-upload">
+        <select class="ipt" id="att-cat" style="width:120px">${catOptions}</select>
+        <input type="file" id="att-file" class="hidden" multiple>
+        <button class="btn btn-primary btn-sm" id="att-pick">⇪ 选择文件上传</button>
+        <span class="muted" style="align-self:center">单文件 ≤ 50MB · 类别可在上传前选择</span>
+        <div class="att-progress hidden" id="att-progress"><div class="att-progress-bar" id="att-progress-bar"></div></div>
+      </div>` : '<div class="muted" style="margin-bottom:8px">您没有附件上传权限，仅可查看与下载。</div>'}
+      <div class="table-wrap">
+        <table class="invoice-table att-table">
+          <thead><tr><th>类别</th><th>文件名</th><th class="ta-r" style="width:80px">大小</th><th style="width:120px">上传日期</th><th style="width:110px">操作</th></tr></thead>
+          <tbody>${list}</tbody>
+        </table>
+      </div>`;
+  },
+
+  /** 绑定事件（render 后调用；onChange：附件变化后刷新汇总） */
+  bind(container, onChange) {
+    const pick = container.querySelector('#att-pick');
+    const fileInput = container.querySelector('#att-file');
+    if (pick && fileInput) {
+      pick.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', async () => {
+        const files = [...fileInput.files];
+        fileInput.value = '';
+        for (const f of files) await this.upload(f, container, onChange);
+      });
+    }
+    container.querySelectorAll('tr[data-att-id]').forEach(tr => {
+      tr.querySelector('[data-att="dl"]')?.addEventListener('click', () => this.download(tr.dataset.attPath, tr.querySelector('td:nth-child(2)').textContent));
+      tr.querySelector('[data-att="del"]')?.addEventListener('click', async () => {
+        const ok = await Utils.confirm('确定删除该附件？文件将从服务器一并删除。', { danger: true, confirmText: '删除' });
+        if (!ok) return;
+        const id = tr.dataset.attId;
+        const att = this.rows.find(a => a.id === id);
+        if (att) await sb.storage.from(this.BUCKET).remove([att.storage_path]);
+        const { error } = await sb.from('ar_attachments').delete().eq('id', id);
+        if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
+        this.rows = this.rows.filter(a => a.id !== id);
+        await this.loadCounts();
+        onChange && onChange();
+        Utils.toast('附件已删除', 'success');
+      });
+    });
+  },
+
+  async upload(file, container, onChange) {
+    if (file.size > this.MAX_SIZE) { Utils.toast(`「${file.name}」超过 50MB，已跳过`, 'error'); return; }
+    const ledgerId = Editor.row && Editor.row.id;
+    if (!ledgerId) { Utils.toast('请先保存记录再上传附件', 'error'); return; }
+    const catSel = container.querySelector('#att-cat');
+    const category = catSel ? catSel.value : '其他';
+    const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+    const path = `${ledgerId}/${(crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2))}.${ext}`;
+
+    const prog = container.querySelector('#att-progress');
+    const bar = container.querySelector('#att-progress-bar');
+    if (prog) { prog.classList.remove('hidden'); if (bar) bar.style.width = '12%'; }
+
+    try {
+      const { error: upErr } = await sb.storage.from(this.BUCKET).upload(path, file, {
+        contentType: file.type || 'application/octet-stream',
+      });
+      if (upErr) throw new Error(upErr.message);
+      if (bar) bar.style.width = '70%';
+      const { data, error } = await sb.from('ar_attachments').insert({
+        ledger_id: ledgerId,
+        category,
+        file_name: file.name,
+        file_size: file.size,
+        content_type: file.type || null,
+        storage_path: path,
+        uploaded_by: Auth.currentUser.id,
+      }).select().single();
+      if (error) {
+        await sb.storage.from(this.BUCKET).remove([path]);
+        throw new Error(error.message);
+      }
+      this.rows.unshift(data);
+      await this.loadCounts();
+      if (bar) bar.style.width = '100%';
+      Utils.toast(`已上传「${file.name}」`, 'success');
+    } catch (err) {
+      Utils.toast('上传失败：' + (err.message || err), 'error');
+    } finally {
+      setTimeout(() => { if (prog) prog.classList.add('hidden'); }, 600);
+      onChange && onChange();
+    }
+  },
+
+  async download(path, name) {
+    try {
+      const { data, error } = await sb.storage.from(this.BUCKET).createSignedUrl(path, 3600);
+      if (error || !data) { Utils.toast('获取下载链接失败：' + (error ? error.message : ''), 'error'); return; }
+      const a = document.createElement('a');
+      a.href = data.signedUrl;
+      a.download = name || '';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      Utils.toast('下载失败：' + (e.message || e), 'error');
+    }
+  },
+};
+</script>
+<script>/**
+ * ledger.js - 台账核心模块 v3（新指标体系）
+ *
+ * 列表 / 筛选（默认「未结」）/ 一项目一屏编辑 / 附件区 / 开票明细 / 回款明细 / 删除
+ * 计算口径：账内应收 = 开票 − 到账；账外应收 = 决算 − 开票；
+ *          应收余额 = 决算 − 到账 − 核销（均为前端虚拟计算列）
+ *          决算金额为空时账外应收 / 应收余额显示「—」且不参与合计（CONTEXT.md）
+ * 字段权限：非管理员（实体部门）仅可编辑催收跟踪类字段（deptEditable），
+ *          新增记录时可额外填写基本信息；金额字段一律财务专属。
+ */
+
+const Ledger = {
+  rows: [],                 // 当前可见台账数据
+  settings: { warn_days: 90 },
+  departments: [],          // 部门字典（ar_departments）
+  filters: { search: '', dept: '全部', project_status: '全部', debt_status: '全部', client_attr: '全部', settled: '未结', batch: null },
+  selected: new Set(),      // 勾选的行 id
+  sortKey: null,
+  sortDir: 1,
+
+  /** 初始化：加载设置、部门字典 */
+  async init() {
+    const { data: setting } = await sb.from('ar_settings').select('*').eq('id', 1).maybeSingle();
+    if (setting) this.settings = setting;
+    const { data: depts } = await sb.from('ar_departments').select('id, name').order('sort_order');
+    this.departments = depts || [];
+  },
+
+  /** 加载台账数据（RLS 已按部门权限隔离）+ 附件计数 */
+  async load() {
+    let query = sb.from('ar_ledger').select('*').order('created_at', { ascending: false });
+    if (this.filters.batch) {
+      query = query.eq('batch_id', this.filters.batch);
+    }
+    const { data, error } = await query.limit(5000);
+    if (error) { Utils.toast('台账加载失败：' + error.message, 'error'); return; }
+    this.rows = data || [];
+    this.selected.clear();
+    await Attachments.loadCounts();
+  },
+
+  /** 行的虚拟计算列
+   *  口径（CONTEXT.md）：决算金额为空时，账外应收 / 应收余额 = null（显示"—"，
+   *  不参与看板与汇总合计）；账内应收照常计算（不依赖决算）。
+   */
+  computeRow(r) {
+    const inv = Number(r.invoiced_amount || 0);
+    const recv = Number(r.received_amount || 0);
+    const wo = Number(r.writeoff_amount || 0);
+    const hasFinal = r.final_amount !== null && r.final_amount !== undefined && r.final_amount !== '';
+    const fin = hasFinal ? Number(r.final_amount) : null;
+    return {
+      receivable_internal: Math.round((inv - recv) * 10000) / 10000,
+      receivable_external: fin === null ? null : Math.round((fin - inv) * 10000) / 10000,
+      receivable_balance: fin === null ? null : Math.round((fin - recv - wo) * 10000) / 10000,
+      attach_summary: Attachments.summaryText(r.id),
+    };
+  },
+
+  deptNameOf(r) {
+    const d = this.departments.find(x => x.id === r.department_id);
+    return d ? d.name : '未指定';
+  },
+
+  /** 筛选后的行 */
+  filteredRows() {
+    const kw = this.filters.search.trim().toLowerCase();
+    const deptId = this.filters.dept === '全部' ? null
+      : (this.departments.find(d => d.name === this.filters.dept) || {}).id;
+    return this.rows.filter(r => {
+      if (this.filters.batch && r.batch_id !== this.filters.batch) return false;
+      // 结清状态（CONTEXT.md「记录生命周期」）：未结 = 应收余额 ≠ 0 或决算未定（余额不可知）
+      if (this.filters.settled === '未结') {
+        const bal = this.computeRow(r).receivable_balance;
+        if (bal === 0) return false;
+      } else if (this.filters.settled === '已结清') {
+        const bal = this.computeRow(r).receivable_balance;
+        if (bal !== 0) return false;
+      }
+      if (deptId && r.department_id !== deptId) return false;
+      if (this.filters.project_status !== '全部' && (r.project_status || '未填写') !== this.filters.project_status) return false;
+      if (this.filters.debt_status !== '全部' && (r.debt_status || '未填写') !== this.filters.debt_status) return false;
+      if (this.filters.client_attr !== '全部' && (r.client_attr && String(r.client_attr).trim() || '未填写') !== this.filters.client_attr) return false;
+      if (kw) {
+        const hay = [r.contract_no, r.project_name, r.owner_unit, r.creditor_unit,
+          r.collector, r.feedback, r.latest_progress, r.next_plan, r.remark, this.deptNameOf(r)]
+          .map(x => String(x || '').toLowerCase()).join(' ');
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    });
+  },
+
+  /** 部门胶囊选项（按记录数排序） */
+  deptCaps() {
+    const counter = {};
+    this.rows.forEach(r => {
+      const k = this.deptNameOf(r);
+      counter[k] = (counter[k] || 0) + 1;
+    });
+    return Object.entries(counter).sort((a, b) => b[1] - a[1]).map(e => e[0]);
+  },
+
+  /** 客户属性胶囊选项（取自实际数据，按记录数排序） */
+  attrCaps() {
+    const counter = {};
+    this.rows.forEach(r => {
+      const k = r.client_attr && String(r.client_attr).trim() || '未填写';
+      counter[k] = (counter[k] || 0) + 1;
+    });
+    return Object.entries(counter).sort((a, b) => b[1] - a[1]).map(e => e[0]);
+  },
+
+  /* ================= 渲染 ================= */
+
+  renderToolbar() {
+    const canAdd = Auth.can('add'), canImport = Auth.can('import'),
+          canExport = Auth.can('export'), canDelete = Auth.can('delete');
+    return `
+      <div class="toolbar">
+        <div class="toolbar-left">
+          ${this.filters.batch ? '<span class="batch-chip">批次内数据 <a data-act="exit-batch">退出</a></span>' : ''}
+          <input id="kw-input" class="kw-input" placeholder="搜索 合同编号 / 项目 / 客户 / 责任人 / 反馈…" value="${Utils.escapeHtml(this.filters.search)}">
+        </div>
+        <div class="toolbar-right">
+          ${canAdd ? '<button class="btn btn-primary" data-act="add">＋ 新增记录</button>' : ''}
+          ${canImport ? '<button class="btn" data-act="import">⇪ 导入 Excel</button>' : ''}
+          ${canExport ? '<button class="btn" data-act="export">⇩ 导出 Excel</button>' : ''}
+          ${canDelete ? `<button class="btn btn-danger-plain" data-act="batch-del" ${this.selected.size ? '' : 'disabled'}>删除选中（${this.selected.size}）</button>` : ''}
+          <button class="btn" data-act="colprefs" id="btn-colprefs">▦ 列设置${ColPrefs.hiddenCount() ? `（隐${ColPrefs.hiddenCount()}）` : ''}</button>
+          <button class="btn" data-act="refresh">刷新</button>
+        </div>
+      </div>`;
+  },
+
+  renderCapsules() {
+    const depts = this.deptCaps();
+    const attrs = this.attrCaps();
+    const statuses = ['全部', ...Dicts.get('project_status')];
+    const debts = ['全部', ...Dicts.get('debt_status')];
+    /* 「全部 / 未结」是本维度的默认值，命中默认值的选中态用淡色（见 .capsule.is-default）：
+       实心蓝只留给"这一维真的被筛过"，于是颜色本身就成了信息 —— 默认状态下一眼是素的 */
+    const cap = (group, val, cur) => {
+      const isDefault = val === (group === 'settled' ? '未结' : '全部');
+      const on = val === cur;
+      const label = { dept: '部门', settled: '结清状态', project_status: '项目状态',
+                      debt_status: '债权状态', client_attr: '客户属性' }[group];
+      return `<button class="capsule ${on ? 'active' : ''} ${on && isDefault ? 'is-default' : ''}"
+        data-group="${group}" data-val="${Utils.escapeHtml(val)}" aria-pressed="${on}"
+        aria-label="${label}：${Utils.escapeHtml(val)}">${Utils.escapeHtml(val)}</button>`;
+    };
+    return `
+      <div class="capsule-row"><span class="capsule-label">部门</span>${depts.length ? [cap('dept', '全部', this.filters.dept), ...depts.map(d => cap('dept', d, this.filters.dept))].join('') : '<span class="muted">暂无数据</span>'}</div>
+      <div class="capsule-row"><span class="capsule-label">结清状态</span>${['未结', '已结清', '全部'].map(s => cap('settled', s, this.filters.settled)).join('')}</div>
+      <div class="capsule-row"><span class="capsule-label">项目状态</span>${statuses.map(p => cap('project_status', p, this.filters.project_status)).join('')}</div>
+      <div class="capsule-row"><span class="capsule-label">债权状态</span>${debts.map(s => cap('debt_status', s, this.filters.debt_status)).join('')}</div>
+      <div class="capsule-row"><span class="capsule-label">客户属性</span>${attrs.length ? [cap('client_attr', '全部', this.filters.client_attr), ...attrs.map(a => cap('client_attr', a, this.filters.client_attr))].join('') : '<span class="muted">暂无数据</span>'}</div>`;
+  },
+
+  /** 当前显示的列定义（列设置过滤后） */
+  visibleDefs() {
+    return [...FIELD_DEFS, ...COMPUTED_DEFS].filter(f => ColPrefs.isVisible(f.key));
+  },
+
+  renderTable() {
+    const rows = this.filteredRows();
+    const canEdit = Auth.can('edit'), canDelete = Auth.can('delete');
+    const allChecked = rows.length > 0 && rows.every(r => this.selected.has(r.id));
+    const defs = this.visibleDefs();
+
+    const headCells = [
+      `<th class="col-check"><input type="checkbox" id="check-all" ${allChecked ? 'checked' : ''}></th>`,
+      `<th class="col-idx">序</th>`,
+      ...defs.map(f =>
+        `<th style="min-width:${f.width}px;max-width:${f.width}px" class="${f.type === 'money' || f.type === 'date' ? 'ta-r' : ''} ${f.key === this.sortKey ? 'sorted' : ''}" data-sort="${f.key}">${f.label}</th>`),
+      `<th class="col-actions">操作</th>`,
+    ].join('');
+
+    const bodyRows = rows.map((r, i) => {
+      const checked = this.selected.has(r.id);
+      const comp = this.computeRow(r);
+      const cells = defs.map(f => {
+        if (f.key === 'attach_summary') {
+          const n = Attachments.count(r.id);
+          return `<td title="${Utils.escapeHtml(comp.attach_summary)}" class="${n ? 'att-has' : 'muted'}">${n ? `📎 ${Utils.escapeHtml(comp.attach_summary)}` : '—'}</td>`;
+        }
+        let v = r[f.key];
+        if (f.type === 'money') {
+          const isCalc = f.key in comp;
+          const val = isCalc ? comp[f.key] : v;
+          if (isCalc && val === null) return `<td class="ta-r td-money muted" title="决算金额未定，暂不计算">—</td>`;
+          const neg = Number(val) < 0;
+          return `<td class="ta-r td-money ${neg ? 'neg' : ''}">${Utils.fmtMoney(val)}</td>`;
+        }
+        if (f.type === 'date') return `<td class="ta-r td-date">${Utils.escapeHtml(v || '')}</td>`;
+        if (f.key === 'project_name') return `<td class="td-name" title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(Utils.clampName(v))}</td>`;
+        if ((f.key === 'project_status' || f.key === 'debt_status') && v) {
+          const cls = TAG_COLORS[v] || 'tag-gray';
+          return `<td><span class="tag ${cls}">${Utils.escapeHtml(v)}</span></td>`;
+        }
+        return `<td title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(v || '')}</td>`;
+      }).join('');
+      const actions = `
+        <td class="col-actions">
+          ${canEdit ? `<a data-act="edit" data-id="${r.id}">编辑</a>` : ''}
+          ${canDelete ? `<a class="link-danger" data-act="del" data-id="${r.id}">删除</a>` : ''}
+        </td>`;
+      return `<tr data-id="${r.id}" class="${checked ? 'row-checked' : ''}">
+        <td class="col-check"><input type="checkbox" class="row-check" data-id="${r.id}" ${checked ? 'checked' : ''}></td>
+        <td class="col-idx">${i + 1}</td>
+        ${cells}${actions}
+      </tr>`;
+    }).join('');
+
+    // 合计行（当前筛选范围）：金额列 + 计算金额列
+    const sum = key => rows.reduce((s, r) => {
+      const f = defs.find(x => x.key === key);
+      const v = (f && key in this.computeRow(r)) ? this.computeRow(r)[key] : r[key];
+      return s + Number(v || 0);
+    }, 0);
+    const footCells = [
+      '<td colspan="2" class="ta-r td-foot td-foot-label">合计</td>',
+      ...defs.map(f => f.type === 'money'
+        ? `<td class="ta-r td-money td-foot">${Utils.fmtMoney(sum(f.key))}</td>`
+        : '<td></td>'),
+      '<td></td>',
+    ].join('');
+
+    /* 空状态：不放进表格里。
+       台账表宽可达 3000px+，而 <td colspan="N"> 里的居中内容会落在
+       整表的中点（约 x=1700），落在可视区之外 —— 也就是"一片空白什么都没有"。
+       改为独立面板，在可见区域内居中。 */
+    if (!rows.length) {
+      const noRows = this.hasActiveFilter();
+      return `
+      <div class="table-wrap is-empty">
+        <div class="empty-state">
+          <span class="es-badge" aria-hidden="true">▤</span>
+          <p class="es-title">${noRows ? '当前筛选条件下没有记录' : '台账还没有记录'}</p>
+          <p class="es-hint">${noRows
+            ? '把「结清状态」切回「未结」或「全部」，或清空搜索关键词'
+            : '点「＋ 新增记录」逐条录入，或用「⇪ 导入 Excel」批量导入'}</p>
+        </div>
+      </div>
+      <div class="table-status">${this.statusText(rows)}</div>`;
+    }
+    return `
+      <div class="table-wrap">
+        <table class="ledger-table">
+          <thead><tr>${headCells}</tr></thead>
+          <tbody>${bodyRows}</tbody>
+          <tfoot><tr>${footCells}</tr></tfoot>
+        </table>
+      </div>
+      <div class="table-status">${this.statusText(rows)}</div>`;
+  },
+
+  /** 表格下沿的状态条：总数 / 筛选后 / 已选 / 隐藏列（隐藏列提示用右侧淡字，避免用户以为列丢了） */
+  statusText(rows) {
+    const shown = (rows || this.filteredRows()).length;
+    const total = this.rows.length;
+    const left = [`共 ${total} 条`];
+    if (shown !== total) left.push(`筛选后 <b>${shown}</b> 条`);
+    if (this.selected.size) left.push(`已选 ${this.selected.size} 条`);
+    if (this.filters.batch) left.push('批次视图');
+    const hidden = ColPrefs.hiddenCount();
+    return left.join(' · ') +
+      (hidden ? `<span class="ts-right">已隐藏 ${hidden} 列 · 「▦ 列设置」可恢复</span>` : '');
+  },
+
+  /** 横向滚动提示：只在确实还有内容滚出去的一侧投影（配合 .table-wrap 的类名） */
+  syncOverflow() {
+    const wrap = document.querySelector('#ledger-table-box .table-wrap');
+    if (!wrap) return;
+    const max = wrap.scrollWidth - wrap.clientWidth;
+    wrap.classList.toggle('is-scrolled', max > 1 && wrap.scrollLeft > 2);
+    wrap.classList.toggle('has-more', max > 1 && wrap.scrollLeft < max - 2);
+  },
+
+  /** 表格重建后重新挂滚动监听（节点是新的，旧监听随之作废） */
+  bindOverflow() {
+    const wrap = document.querySelector('#ledger-table-box .table-wrap');
+    if (wrap) {
+      wrap.addEventListener('scroll', () => this.syncOverflow(), { passive: true });
+      this.syncOverflow();
+    }
+    if (!this._resizeBound) {
+      this._resizeBound = true;
+      window.addEventListener('resize', Utils.debounce(() => this.syncOverflow(), 150));
+    }
+  },
+
+  /** 是否有生效的筛选条件（用于区分「筛选无结果」与「真的没有数据」） */
+  hasActiveFilter() {
+    const f = this.filters;
+    return !!(f.search.trim() || f.dept !== '全部' || f.project_status !== '全部'
+      || f.debt_status !== '全部' || f.client_attr !== '全部' || f.settled !== '全部' || f.batch);
+  },
+
+  render() {
+    const main = document.getElementById('page-ledger');
+    if (!main) return;
+    main.innerHTML = this.renderToolbar() + this.renderCapsules() + '<div id="ledger-table-box">' + this.renderTable() + '</div>';
+    this.bindEvents(main);
+    this.bindOverflow();
+  },
+
+  /** 只刷新表格区（筛选/勾选变化时避免整页重绘导致输入框失焦） */
+  refreshTable() {
+    const box = document.getElementById('ledger-table-box');
+    if (box) box.innerHTML = this.renderTable();
+    const btn = document.querySelector('[data-act="batch-del"]');
+    if (btn) {
+      btn.textContent = `删除选中（${this.selected.size}）`;
+      btn.disabled = !this.selected.size;
+    }
+    this.bindTableEvents(box);
+    this.bindOverflow();
+  },
+
+  /* ================= 事件 ================= */
+
+  bindEvents(root) {
+    const kw = root.querySelector('#kw-input');
+    if (kw) kw.addEventListener('input', Utils.debounce(e => {
+      this.filters.search = e.target.value;
+      this.refreshTable();
+    }, 250));
+
+    root.querySelectorAll('.capsule').forEach(c => c.addEventListener('click', () => {
+      const g = c.dataset.group, v = c.dataset.val;
+      this.filters[g] = v;
+      root.querySelectorAll(`.capsule[data-group="${g}"]`).forEach(x => {
+        const on = x === c;
+        x.classList.toggle('active', on);
+        x.setAttribute('aria-pressed', String(on));
+      });
+      this.refreshTable();
+    }));
+
+    root.querySelectorAll('[data-act]').forEach(el => {
+      const act = el.dataset.act;
+      if (act === 'refresh') el.addEventListener('click', () => this.reload());
+      if (act === 'add' && Auth.can('add')) el.addEventListener('click', () => Editor.open(null));
+      if (act === 'import') el.addEventListener('click', () => Importer.open());
+      if (act === 'export') el.addEventListener('click', () => Exporter.open());
+      if (act === 'colprefs') el.addEventListener('click', () => ColPrefs.openPanel(el, () => this.render()));
+      if (act === 'exit-batch') el.addEventListener('click', () => {
+        this.filters.batch = null; App.navigate('ledger'); Batches.load();
+      });
+      if (act === 'batch-del' && Auth.can('delete')) el.addEventListener('click', () => this.deleteSelected());
+    });
+
+    this.bindTableEvents(root);
+  },
+
+  bindTableEvents(root) {
+    if (!root) return;
+    const checkAll = root.querySelector('#check-all');
+    if (checkAll) checkAll.addEventListener('change', e => {
+      const rows = this.filteredRows();
+      if (e.target.checked) rows.forEach(r => this.selected.add(r.id));
+      else rows.forEach(r => this.selected.delete(r.id));
+      this.refreshTable();
+    });
+
+    root.querySelectorAll('.row-check').forEach(cb => cb.addEventListener('change', e => {
+      const id = e.target.dataset.id;
+      e.target.checked ? this.selected.add(id) : this.selected.delete(id);
+      e.target.closest('tr').classList.toggle('row-checked', e.target.checked);
+      const btn = document.querySelector('[data-act="batch-del"]');
+      if (btn) { btn.textContent = `删除选中（${this.selected.size}）`; btn.disabled = !this.selected.size; }
+      const status = document.querySelector('.table-status');
+      if (status) status.innerHTML = this.statusText(this.filteredRows());
+    }));
+
+    root.querySelectorAll('th[data-sort]').forEach(th => th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (this.sortKey === key) this.sortDir *= -1;
+      else { this.sortKey = key; this.sortDir = 1; }
+      const f = [...FIELD_DEFS, ...COMPUTED_DEFS].find(x => x.key === key);
+      this.rows.sort((a, b) => {
+        const va = (f && f.key in this.computeRow(a)) ? this.computeRow(a)[key] : a[key];
+        const vb = (f && f.key in this.computeRow(b)) ? this.computeRow(b)[key] : b[key];
+        if (f && f.type === 'money') return (Number(va || 0) - Number(vb || 0)) * this.sortDir;
+        return String(va || '').localeCompare(String(vb || ''), 'zh') * this.sortDir;
+      });
+      this.refreshTable();
+    }));
+
+    root.querySelectorAll('td [data-act]').forEach(el => el.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = el.dataset.id, act = el.dataset.act;
+      const row = this.rows.find(r => r.id === id);
+      if (!row) return;
+      if (act === 'edit') Editor.open(row);
+      if (act === 'del' && Auth.can('delete')) {
+        const ok = await Utils.confirm(`确定删除该条台账记录？\n合同编号：${row.contract_no || '（空）'}\n项目：${Utils.clampName(row.project_name)}\n该记录的附件与开票/回款明细将一并删除。`, { danger: true, confirmText: '删除' });
+        if (!ok) return;
+        const { error } = await sb.from('ar_ledger').delete().eq('id', id);
+        if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
+        Utils.toast('已删除', 'success');
+        await this.reload();
+      }
+    }));
+  },
+
+  /** 删除勾选行 */
+  async deleteSelected() {
+    const ids = [...this.selected];
+    if (!ids.length) return;
+    const ok = await Utils.confirm(`确定删除选中的 ${ids.length} 条台账记录？\n删除后不可恢复（附件与开票/回款明细将一并删除）。`, { danger: true, confirmText: '删除' });
+    if (!ok) return;
+    const { error } = await sb.from('ar_ledger').delete().in('id', ids);
+    if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
+    Utils.toast(`已删除 ${ids.length} 条记录`, 'success');
+    await this.reload();
+  },
+
+  async reload() {
+    await this.load();
+    this.render();
+  },
+};
+
+/* ============================================================
+ * Editor - 单条台账编辑（要求一：一个项目一个界面）
+ * 全部要素分区单屏展示：基本信息 / 状态与金额（实时计算） /
+ * 债权与催收 / 附件上传区 / 开票明细
+ * ============================================================ */
+
+const Editor = {
+  row: null,
+  isNew: false,
+
+  /** 非管理员可编辑的字段 key 集合（新增时可填基本信息，编辑时仅催收跟踪类） */
+  editableKeys() {
+    if (Auth.isAdmin) return null;   // null = 全部可编辑
+    const keys = FIELD_DEFS.filter(f => f.deptEditable).map(f => f.key);
+    if (this.isNew) {
+      FORM_GROUPS[0].fields.forEach(k => { if (!keys.includes(k)) keys.push(k); });
+    }
+    return new Set(keys);
+  },
+
+  canEditField(key) {
+    const set = this.editableKeys();
+    if (!set) return true;
+    return set.has(key);
+  },
+
+  open(row) {
+    this.row = row;
+    this.isNew = !row;
+    Attachments.rows = [];
+    this.receipts = [];
+    this.renderModal();
+    if (!this.isNew) {
+      Attachments.loadFor(row.id).then(() => this.renderAttachments());
+      this.loadInvoices();
+      this.loadReceipts();
+    }
+    this.loadOwnerUnits();
+  },
+
+  async loadOwnerUnits() {
+    // 客户名称建议：内置预设 + 库内历史值
+    const { data } = await sb.from('ar_ledger').select('owner_unit').not('owner_unit', 'is', null).limit(500);
+    const set = new Set(OWNER_UNIT_PRESETS);
+    (data || []).forEach(d => { if (d.owner_unit) set.add(d.owner_unit); });
+    const dl = document.getElementById('dl-owner-units');
+    if (dl) dl.innerHTML = [...set].map(u => `<option value="${Utils.escapeHtml(u)}">`).join('');
+  },
+
+  /* ---------- 表单控件 ---------- */
+
+  inputWidget(f, v, disabled) {
+    const id = `ed-${f.key}`;
+    const dis = disabled ? 'disabled' : '';
+    const val = v === null || v === undefined ? '' : v;
+
+    if (f.type === 'money')
+      return `<input type="number" step="0.0001" class="ipt ta-r" id="${id}" value="${val}" ${dis}>`;
+    if (f.type === 'date')
+      return `<input type="date" class="ipt" id="${id}" value="${val ? Utils.fmtDate(val) : ''}" ${dis}>`;
+    if (f.type === 'textarea')
+      return `<textarea class="ipt" id="${id}" rows="2" ${dis}>${Utils.escapeHtml(val)}</textarea>`;
+    if (f.type === 'select') {
+      const opts = Dicts.get(f.dict);
+      const isCustom = val && !opts.includes(val);
+      if (f.freeOther) {
+        const otherId = `${id}__free`;
+        return `<div class="sel-free" data-sf="${f.key}">
+          <select class="ipt" id="${id}" ${dis}>
+            <option value="">（请选择）</option>
+            ${opts.map(o => `<option value="${Utils.escapeHtml(o)}" ${val === o ? 'selected' : ''}>${Utils.escapeHtml(o)}</option>`).join('')}
+            ${isCustom ? `<option value="__custom__" selected>${Utils.escapeHtml(val)}（自定义）</option>` : ''}
+            <option value="__other__">其他（自由填写）…</option>
+          </select>
+          <input class="ipt hidden" id="${otherId}" placeholder="请填写具体内容" ${dis}>
+        </div>`;
+      }
+      return `<select class="ipt" id="${id}" ${dis}>
+        <option value="">（请选择）</option>
+        ${opts.map(o => `<option value="${Utils.escapeHtml(o)}" ${val === o ? 'selected' : ''}>${Utils.escapeHtml(o)}</option>`).join('')}
+      </select>`;
+    }
+    if (f.type === 'combo') {
+      const dlId = `dlc-${f.key}`;
+      const opts = Dicts.get(f.dict);
+      return `<input class="ipt" id="${id}" list="${dlId}" value="${Utils.escapeHtml(val)}" ${dis}>
+        <datalist id="${dlId}">${opts.map(o => `<option value="${Utils.escapeHtml(o)}">`).join('')}</datalist>`;
+    }
+    if (f.datalist)
+      return `<input class="ipt" id="${id}" list="dl-owner-units" value="${Utils.escapeHtml(val)}" ${dis}>`;
+    return `<input class="ipt" id="${id}" value="${Utils.escapeHtml(val)}" ${dis}>`;
+  },
+
+  fieldCell(key) {
+    const f = FIELD_DEFS.find(x => x.key === key);
+    const r = this.row || {};
+    const locked = !this.canEditField(key);
+    const hint = key === 'charge_date'
+      ? '<i style="font-style:normal;color:var(--text-3)">（自动=最近开票日期）</i>' : '';
+    return `<label class="form-field ${locked ? 'ff-locked' : ''}" title="${locked ? '财务字段，仅财务管理员可修改' : ''}">
+      <span class="ff-label">${f.label}${hint}${locked ? ' 🔒' : ''}</span>${this.inputWidget(f, r[key], locked)}</label>`;
+  },
+
+  /* ---------- 弹窗 ---------- */
+
+  renderModal() {
+    const old = document.getElementById('modal-editor');
+    if (old) old.remove();
+    const r = this.row || {};
+    const isAdmin = Auth.isAdmin;
+    const deptOpts = ['<option value="">（未指定）</option>', ...Ledger.departments.map(d =>
+      `<option value="${d.id}" ${r.department_id === d.id ? 'selected' : ''}>${Utils.escapeHtml(d.name)}</option>`)].join('');
+
+    const sec = (groupKey, extra = '') => {
+      const g = FORM_GROUPS.find(x => x.key === groupKey);
+      return `<div class="form-sec">
+        <div class="form-sec-title">${g.label}${!isAdmin && groupKey === 'dunning' ? '<span class="form-sec-tag">本部门可编辑区</span>' : ''}</div>
+        <div class="form-grid">${g.fields.map(k => this.fieldCell(k)).join('')}</div>
+        ${extra}
+      </div>`;
+    };
+
+    // 状态与金额：合同金额（自动带入决算）+ 实时计算条
+    const r0 = this.row || {};
+    const contractAmtField = `
+      <label class="form-field" title="决算方式非「工作量」时，保存后合同金额自动带入决算金额（可手动修改）">
+        <span class="ff-label">合同金额<i style="font-style:normal;color:var(--text-3)">（自动带入决算）</i></span>
+        <input type="number" step="0.0001" class="ipt ta-r" id="ed-contract_amount" value="${r0.contract_amount === null || r0.contract_amount === undefined ? '' : r0.contract_amount}">
+      </label>`;
+    const calcBar = `
+      <div class="calc-bar" id="calc-bar">
+        <span>账内应收 <b id="calc-internal">—</b><i>= 开票 − 到账</i></span>
+        <span>账外应收 <b id="calc-external">—</b><i>= 决算 − 开票</i></span>
+        <span>应收余额 <b id="calc-balance">—</b><i>= 决算 − 到账 − 核销</i></span>
+      </div>`;
+    const financeSec = `
+      <div class="form-sec">
+        <div class="form-sec-title">状态与金额${!isAdmin ? '<span class="form-sec-tag warn">金额字段仅财务可修改</span>' : ''}</div>
+        ${isAdmin ? `<label class="form-field ff-dept"><span class="ff-label">部门名称（数据归属）</span>
+          <select class="ipt" id="ed-department_id">${deptOpts}</select></label>` : ''}
+        <div class="form-grid">
+          ${FORM_GROUPS[1].fields.map(k => this.fieldCell(k)).join('')}
+          ${isAdmin ? contractAmtField : ''}
+        </div>
+        ${calcBar}
+      </div>`;
+
+    const attachSec = `
+      <div class="form-sec" id="sec-attachments">
+        <div class="form-sec-title">附件上传区<span class="form-sec-tag">决算 / 中止证明 / 其他</span></div>
+        <div id="att-box"><div class="loading-hint">附件加载中…</div></div>
+      </div>`;
+
+    const invoiceSec = `
+      <div class="form-sec" id="sec-invoices">
+        <div class="form-sec-title">开票明细<span class="muted" style="font-weight:400">（逐笔登记，「开票金额」可一键同步合计）</span></div>
+        <div id="invoice-pane"><div class="loading-hint">开票明细加载中…</div></div>
+      </div>`;
+
+    const receiptSec = `
+      <div class="form-sec" id="sec-receipts">
+        <div class="form-sec-title">回款明细<span class="muted" style="font-weight:400">（逐笔登记到账，「到账金额」可一键同步合计，仅财务）</span></div>
+        <div id="receipt-pane"><div class="loading-hint">回款明细加载中…</div></div>
+      </div>`;
+
+    const el = document.createElement('div');
+    el.id = 'modal-editor';
+    el.className = 'modal-mask';
+    el.innerHTML = `
+      <div class="modal modal-xl">
+        <div class="modal-header">
+          ${this.isNew ? '新增台账记录' : `编辑台账记录${r.contract_no ? ' · ' + Utils.escapeHtml(r.contract_no) : ''}`}
+          <span class="modal-close" data-act="close">×</span>
+        </div>
+        <div class="modal-body">
+          <datalist id="dl-owner-units"></datalist>
+          ${!isAdmin ? '<div class="lock-banner">您是部门账号：可更新<b>催收跟踪信息与附件</b>；财务金额类字段由财务管理员维护。</div>' : ''}
+          ${sec('base')}
+          ${financeSec}
+          ${sec('dunning')}
+          ${attachSec}
+          ${invoiceSec}
+          ${receiptSec}
+          <div id="editor-error" class="editor-error hidden"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" data-act="close">关闭</button>
+          <button class="btn btn-primary" data-act="save">${this.isNew ? '保存' : '保存修改'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(el);
+    this.bindModal(el);
+    this.syncCalc(el);
+    this.renderAttachments();
+  },
+
+  bindModal(el) {
+    el.querySelector('[data-act="close"]').addEventListener('click', () => el.remove());
+    Utils.bindMaskClose(el, () => el.remove());
+    el.querySelector('[data-act="save"]').addEventListener('click', () => this.save(el));
+
+    // 实时计算
+    ['final_amount', 'invoiced_amount', 'received_amount', 'writeoff_amount'].forEach(k => {
+      el.querySelector('#ed-' + k)?.addEventListener('input', () => this.syncCalc(el));
+    });
+
+    // 合同额自动带入决算（ADR-0003）：决算方式非「工作量」且决算金额为空时带入
+    const finalMethodSel = el.querySelector('#ed-final_method');
+    const contractAmt = el.querySelector('#ed-contract_amount');
+    const finalAmt = el.querySelector('#ed-final_amount');
+    const currentMethod = () => {
+      if (!finalMethodSel) return '';
+      if (finalMethodSel.value === '__other__') {
+        const free = el.querySelector('#ed-final_method__free');
+        return free ? free.value.trim() : '';
+      }
+      return finalMethodSel.value || '';
+    };
+    const autoFillFinal = () => {
+      if (!contractAmt || !finalAmt || finalAmt.disabled) return;
+      const m = currentMethod();
+      if (m && m !== '工作量' && finalAmt.value === '' && contractAmt.value !== '') {
+        finalAmt.value = contractAmt.value;
+        this.syncCalc(el);
+        Utils.toast('已按合同金额带入「决算金额」（决算方式非工作量），可手动修改', 'info');
+      }
+    };
+    finalMethodSel?.addEventListener('change', autoFillFinal);
+    contractAmt?.addEventListener('input', autoFillFinal);
+
+    // 「其他（自由填写）」联动
+    el.querySelectorAll('.sel-free').forEach(box => {
+      const key = box.dataset.sf;
+      const sel = box.querySelector(`#ed-${key}`);
+      const free = box.querySelector(`#ed-${key}__free`);
+      sel.addEventListener('change', () => {
+        if (sel.value === '__other__') {
+          free.classList.remove('hidden');
+          free.focus();
+        } else {
+          free.classList.add('hidden');
+        }
+      });
+      // 当前值为自定义：直接进入自由填写态
+      if (sel.value === '__other__') {
+        free.classList.remove('hidden');
+      }
+    });
+  },
+
+  /** 读取 select+free 组合的最终值 */
+  readField(el, f) {
+    if (f.type === 'select' && f.freeOther) {
+      const sel = el.querySelector('#ed-' + f.key);
+      if (!sel) return null;
+      if (sel.value === '__other__') {
+        const free = el.querySelector(`#ed-${f.key}__free`);
+        return (free && free.value.trim()) || null;
+      }
+      if (sel.value === '__custom__') {
+        // 自定义保留原值
+        return (this.row && this.row[f.key]) || null;
+      }
+      return sel.value || null;
+    }
+    const node = el.querySelector('#ed-' + f.key);
+    if (!node) return null;
+    if (f.type === 'money') return node.value === '' ? null : Number(node.value);
+    if (f.type === 'date') return node.value || null;
+    return node.value.trim() || null;
+  },
+
+  syncCalc(el) {
+    const num = id => { const n = el.querySelector('#ed-' + id); return n && !n.disabled ? Number(n.value || 0) : Number((this.row || {})[id] || 0); };
+    const raw = id => { const n = el.querySelector('#ed-' + id); return n && !n.disabled ? n.value : (this.row || {})[id]; };
+    const inv = num('invoiced_amount'), recv = num('received_amount'), wo = num('writeoff_amount');
+    // 决算未定（输入为空）→ 账外应收 / 应收余额显示「—」（CONTEXT.md 金额口径）
+    const hasFin = raw('final_amount') !== '' && raw('final_amount') !== null && raw('final_amount') !== undefined;
+    const fin = hasFin ? Number(raw('final_amount')) : null;
+    const set = (id, v) => { const n = el.querySelector('#' + id); if (n) n.textContent = v === null ? '—' : (Utils.fmtMoney(Math.round(v * 100) / 100) || '0'); };
+    set('calc-internal', inv - recv);
+    set('calc-external', fin === null ? null : fin - inv);
+    set('calc-balance', fin === null ? null : fin - recv - wo);
+  },
+
+  /** 收集表单并保存 */
+  async save(el) {
+    const errBox = el.querySelector('#editor-error');
+    errBox.classList.add('hidden');
+    const editable = this.editableKeys();
+
+    const payload = {};
+    FIELD_DEFS.forEach(f => {
+      if (editable && !editable.has(f.key)) return;   // 非管理员只提交自己可编辑的字段
+      payload[f.key] = this.readField(el, f);
+    });
+    if (Auth.isAdmin) {
+      const dept = el.querySelector('#ed-department_id');
+      payload.department_id = dept && dept.value ? dept.value : null;
+      const cAmt = el.querySelector('#ed-contract_amount');
+      payload.contract_amount = cAmt && cAmt.value !== '' ? Number(cAmt.value) : null;
+    } else if (this.isNew && Auth.arUser && Auth.arUser.department_id) {
+      payload.department_id = Auth.arUser.department_id;
+    }
+
+    if (!payload.contract_no && !payload.project_name) {
+      errBox.textContent = '合同编号与项目名称至少填写一项';
+      errBox.classList.remove('hidden');
+      return;
+    }
+
+    let error;
+    if (this.isNew) {
+      payload.created_by = Auth.currentUser.id;
+      ({ error } = await sb.from('ar_ledger').insert(payload));
+    } else {
+      ({ error } = await sb.from('ar_ledger').update(payload).eq('id', this.row.id));
+    }
+    if (error) {
+      const msg = /AR_FIELD_LOCKED/.test(error.message)
+        ? '保存被拒绝：金额等财务字段仅财务管理员可修改，请只更新催收跟踪信息。'
+        : '保存失败：' + error.message;
+      errBox.textContent = msg;
+      errBox.classList.remove('hidden');
+      return;
+    }
+    Utils.toast(this.isNew ? '新增成功' : '保存成功', 'success');
+    el.remove();
+    await Ledger.reload();
+  },
+
+  /* ---------- 附件区 ---------- */
+
+  renderAttachments() {
+    const box = document.getElementById('att-box');
+    if (!box) return;
+    if (this.isNew) {
+      box.innerHTML = '<div class="muted" style="padding:4px 0">保存记录后即可上传附件（决算 / 中止证明 / 其他）。</div>';
+      return;
+    }
+    const canEdit = Auth.can('edit');   // 要求五：实体部门对附件有编辑权限
+    box.innerHTML = Attachments.render(canEdit);
+    Attachments.bind(box, () => this.renderAttachments());
+  },
+
+  /* ---------- 开票明细 ---------- */
+
+  invoices: [],
+
+  async loadInvoices() {
+    if (!this.row) return;
+    const { data, error } = await sb.from('ar_invoices')
+      .select('*').eq('ledger_id', this.row.id).order('invoice_date', { ascending: false });
+    if (!error) this.invoices = data || [];
+    this.renderInvoicePane();
+  },
+
+  renderInvoicePane() {
+    const pane = document.getElementById('invoice-pane');
+    if (!pane) return;
+    const isAdmin = Auth.isAdmin;   // 开票金额属财务字段，非管理员只读
+    const sum = this.invoices.reduce((s, i) => s + Number(i.amount || 0), 0);
+    if (this.isNew) {
+      pane.innerHTML = '<div class="muted" style="padding:6px 0">保存记录后即可逐笔登记开票明细。</div>';
+      return;
+    }
+    pane.innerHTML = `
+      <div class="invoice-summary">本合同累计开票：<b>${Utils.fmtMoney(sum)}</b>
+        ${isAdmin ? '<button class="btn btn-xs" data-act="sync-invoiced">同步到「开票金额」</button>' : '<span class="muted">（仅财务可登记开票）</span>'}</div>
+      <table class="invoice-table">
+        <thead><tr><th style="width:110px">开票日期</th><th style="width:130px">发票号码</th><th style="width:110px" class="ta-r">金额</th><th>备注</th>${isAdmin ? '<th style="width:60px">操作</th>' : ''}</tr></thead>
+        <tbody>
+          ${this.invoices.map(i => `<tr data-inv-id="${i.id}">
+            <td>${Utils.escapeHtml(i.invoice_date)}</td>
+            <td>${Utils.escapeHtml(i.invoice_no || '')}</td>
+            <td class="ta-r td-money">${Utils.fmtMoney(i.amount)}</td>
+            <td>${Utils.escapeHtml(i.remark || '')}</td>
+            ${isAdmin ? `<td><a class="link-danger" data-act="inv-del">删除</a></td>` : ''}
+          </tr>`).join('') || '<tr><td colspan="5" class="empty-cell">暂无开票记录，在下方新增</td></tr>'}
+        </tbody>
+      </table>
+      ${isAdmin ? `
+      <div class="invoice-add">
+        <input type="date" class="ipt" id="inv-date" value="${Utils.today()}">
+        <input class="ipt" id="inv-no" placeholder="发票号码（选填）" style="width:140px">
+        <input type="number" step="0.0001" class="ipt ta-r" id="inv-amount" placeholder="金额" style="width:120px">
+        <input class="ipt" id="inv-remark" placeholder="备注（选填）">
+        <button class="btn btn-primary" data-act="inv-add">＋ 添加开票记录</button>
+      </div>` : ''}`;
+
+    pane.querySelector('[data-act="inv-add"]')?.addEventListener('click', () => this.addInvoice());
+    pane.querySelector('[data-act="sync-invoiced"]')?.addEventListener('click', () => this.syncInvoiced(sum));
+    pane.querySelectorAll('[data-act="inv-del"]').forEach(a => a.addEventListener('click', async e => {
+      const tr = e.target.closest('tr');
+      const id = tr.dataset.invId;
+      const { error } = await sb.from('ar_invoices').delete().eq('id', id);
+      if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
+      this.invoices = this.invoices.filter(i => i.id !== id);
+      this.renderInvoicePane();
+      this.recalcChargeDate();
+    }));
+  },
+
+  /** 「最新挂账时间」自动维护（2026-09-15 决策）：= 开票明细中最近一笔开票日期。
+   *  开票明细增删后重算；明细为空则不动（保留手填/导入的历史值）。
+   */
+  async recalcChargeDate() {
+    if (!this.row || !this.invoices.length) return;
+    const latest = this.invoices
+      .map(i => i.invoice_date)
+      .filter(Boolean)
+      .sort()
+      .pop();
+    if (!latest || latest === this.row.charge_date) return;
+    const { error } = await sb.from('ar_ledger').update({ charge_date: latest }).eq('id', this.row.id);
+    if (error) { Utils.toast('挂账时间更新失败：' + error.message, 'error'); return; }
+    this.row.charge_date = latest;
+    const input = document.querySelector('#modal-editor #ed-charge_date');
+    if (input && !input.disabled) input.value = latest;
+  },
+
+  async addInvoice() {
+    const date = document.getElementById('inv-date').value;
+    const amount = document.getElementById('inv-amount').value;
+    if (!date) { Utils.toast('请选择开票日期', 'error'); return; }
+    if (amount === '' || !(Number(amount) >= 0)) { Utils.toast('请填写开票金额', 'error'); return; }
+    const payload = {
+      ledger_id: this.row.id,
+      invoice_date: date,
+      amount: Number(amount),
+      invoice_no: document.getElementById('inv-no').value.trim() || null,
+      remark: document.getElementById('inv-remark').value.trim() || null,
+      created_by: Auth.currentUser.id,
+    };
+    const { data, error } = await sb.from('ar_invoices').insert(payload).select().single();
+    if (error) { Utils.toast('添加失败：' + error.message, 'error'); return; }
+    this.invoices.unshift(data);
+    this.renderInvoicePane();
+    this.recalcChargeDate();
+    document.getElementById('inv-amount').value = '';
+    document.getElementById('inv-remark').value = '';
+    document.getElementById('inv-no').value = '';
+    Utils.toast('已添加开票记录', 'success');
+  },
+
+  /** 把开票合计写回台账「开票金额」（仅财务） */
+  async syncInvoiced(sum) {
+    const { error } = await sb.from('ar_ledger').update({ invoiced_amount: sum }).eq('id', this.row.id);
+    if (error) { Utils.toast('同步失败：' + error.message, 'error'); return; }
+    Utils.toast('已同步到「开票金额」', 'success');
+    this.row.invoiced_amount = sum;
+    this.syncCalc(document.getElementById('modal-editor'));
+  },
+
+  /* ---------- 回款明细（v3.1：与开票明细对称，仅财务可维护） ---------- */
+
+  receipts: [],
+
+  async loadReceipts() {
+    if (!this.row) return;
+    const { data, error } = await sb.from('ar_receipts')
+      .select('*').eq('ledger_id', this.row.id).order('receipt_date', { ascending: false });
+    if (!error) this.receipts = data || [];
+    this.renderReceiptPane();
+  },
+
+  renderReceiptPane() {
+    const pane = document.getElementById('receipt-pane');
+    if (!pane) return;
+    const isAdmin = Auth.isAdmin;   // 到账金额属财务字段，非管理员只读
+    const sum = this.receipts.reduce((s, i) => s + Number(i.amount || 0), 0);
+    if (this.isNew) {
+      pane.innerHTML = '<div class="muted" style="padding:6px 0">保存记录后即可逐笔登记回款明细。</div>';
+      return;
+    }
+    pane.innerHTML = `
+      <div class="invoice-summary">本合同累计到账：<b>${Utils.fmtMoney(sum)}</b>
+        ${isAdmin ? '<button class="btn btn-xs" data-act="sync-received">同步到「到账金额」</button>' : '<span class="muted">（仅财务可登记回款）</span>'}</div>
+      <table class="invoice-table">
+        <thead><tr><th style="width:110px">到账日期</th><th style="width:110px" class="ta-r">金额</th><th>备注</th>${isAdmin ? '<th style="width:60px">操作</th>' : ''}</tr></thead>
+        <tbody>
+          ${this.receipts.map(i => `<tr data-rec-id="${i.id}">
+            <td>${Utils.escapeHtml(i.receipt_date)}</td>
+            <td class="ta-r td-money">${Utils.fmtMoney(i.amount)}</td>
+            <td>${Utils.escapeHtml(i.remark || '')}</td>
+            ${isAdmin ? `<td><a class="link-danger" data-act="rec-del">删除</a></td>` : ''}
+          </tr>`).join('') || '<tr><td colspan="4" class="empty-cell">暂无回款记录，在下方新增</td></tr>'}
+        </tbody>
+      </table>
+      ${isAdmin ? `
+      <div class="invoice-add">
+        <input type="date" class="ipt" id="rec-date" value="${Utils.today()}">
+        <input type="number" step="0.0001" class="ipt ta-r" id="rec-amount" placeholder="到账金额" style="width:120px">
+        <input class="ipt" id="rec-remark" placeholder="备注（选填）">
+        <button class="btn btn-primary" data-act="rec-add">＋ 添加回款记录</button>
+      </div>` : ''}`;
+
+    pane.querySelector('[data-act="rec-add"]')?.addEventListener('click', () => this.addReceipt());
+    pane.querySelector('[data-act="sync-received"]')?.addEventListener('click', () => this.syncReceived(sum));
+    pane.querySelectorAll('[data-act="rec-del"]').forEach(a => a.addEventListener('click', async e => {
+      const tr = e.target.closest('tr');
+      const id = tr.dataset.recId;
+      const { error } = await sb.from('ar_receipts').delete().eq('id', id);
+      if (error) { Utils.toast('删除失败：' + error.message, 'error'); return; }
+      this.receipts = this.receipts.filter(i => i.id !== id);
+      this.renderReceiptPane();
+    }));
+  },
+
+  async addReceipt() {
+    const date = document.getElementById('rec-date').value;
+    const amount = document.getElementById('rec-amount').value;
+    if (!date) { Utils.toast('请选择到账日期', 'error'); return; }
+    if (amount === '' || !(Number(amount) >= 0)) { Utils.toast('请填写到账金额', 'error'); return; }
+    const payload = {
+      ledger_id: this.row.id,
+      receipt_date: date,
+      amount: Number(amount),
+      remark: document.getElementById('rec-remark').value.trim() || null,
+      created_by: Auth.currentUser.id,
+    };
+    const { data, error } = await sb.from('ar_receipts').insert(payload).select().single();
+    if (error) { Utils.toast('添加失败：' + error.message, 'error'); return; }
+    this.receipts.unshift(data);
+    this.renderReceiptPane();
+    document.getElementById('rec-amount').value = '';
+    document.getElementById('rec-remark').value = '';
+    Utils.toast('已添加回款记录', 'success');
+  },
+
+  /** 把回款合计写回台账「到账金额」（仅财务） */
+  async syncReceived(sum) {
+    const { error } = await sb.from('ar_ledger').update({ received_amount: sum }).eq('id', this.row.id);
+    if (error) { Utils.toast('同步失败：' + error.message, 'error'); return; }
+    Utils.toast('已同步到「到账金额」', 'success');
+    this.row.received_amount = sum;
+    this.syncCalc(document.getElementById('modal-editor'));
+  },
+};
+</script>
+<script>
+/* ---------- 模拟数据 & 假依赖（仅预览用） ---------- */
+const DEPTS = [
+  { id: 'd1', name: '财务资产部', sort_order: 0 },
+  { id: 'd2', name: '工程物探所', sort_order: 1 },
+  { id: 'd3', name: '测绘地理信息院', sort_order: 2 },
+  { id: 'd4', name: '地质勘查一分院', sort_order: 3 }
+];
+
+const R = (o) => Object.assign({
+  department_id: 'd2', charge_date: '2024-06-18', final_method: '合同金额',
+  writeoff_amount: 0, remark: '', collector: '翟悟飞', client_attr: '政府部门--省',
+  creditor_unit: '物化院', work_nature: '综合物探', sector: '能源资源勘查开发',
+  comm_method: '函件+电话', next_plan: '跟踪付款进度'
+}, o);
+
+const ROWS = [
+  R({ id: 'r1', batch_id: 'b1', contract_no: 'SX2021-018', project_name: '山西省沁水煤田郑庄区块三维地震勘探',
+      owner_unit: '山西晋城无烟煤矿业集团有限责任公司', client_attr: '煤矿集团--晋能控股',
+      project_status: '完工', debt_status: '逾期', final_amount: 4862000, invoiced_amount: 4862000,
+      received_amount: 1200000, writeoff_amount: 0, charge_date: '2024-03-12', dunning_date: '2026-07-02',
+      feedback: '承认欠款，但资金紧张', latest_progress: '已发送第二次催款函', collector: '翟悟飞' }),
+  R({ id: 'r2', batch_id: 'b1', contract_no: 'SX2022-073', project_name: '大同市云冈区宅基地和农房一体确权登记颁证项目',
+      owner_unit: '大同市云冈区自然资源局', client_attr: '政府部门--市',
+      project_status: '完工', debt_status: '诉讼', final_amount: 3120500, invoiced_amount: 2800000,
+      received_amount: 1500000, charge_date: '2024-09-05', dunning_date: '2026-06-20',
+      feedback: '工程量结算有争议', latest_progress: '移交法务部', next_plan: '申请财产保全', work_nature: '房地一体' }),
+  R({ id: 'r3', batch_id: null, contract_no: 'SX2023-004', project_name: '临汾市尧都区地质灾害风险调查评价',
+      owner_unit: '临汾市规划和自然资源局', client_attr: '政府部门--市',
+      project_status: '施工中', debt_status: '正常', final_amount: null, invoiced_amount: 860000,
+      received_amount: 600000, charge_date: '2025-11-14', dunning_date: '2026-08-01',
+      feedback: '正在筹款，近期付', latest_progress: '已安排对账', next_plan: '跟踪付款进度',
+      work_nature: '地灾评估、勘察、设计', sector: '地质灾害治理' }),
+  R({ id: 'r4', batch_id: null, contract_no: 'SX2020-116', project_name: '吕梁市离石区煤矸石生态修复治理工程物探',
+      owner_unit: '山西焦煤集团岚县正利煤业有限公司', client_attr: '煤矿集团--山西焦煤',
+      project_status: '完工', debt_status: '和解', final_amount: 1740000, invoiced_amount: 1740000,
+      received_amount: 900000, writeoff_amount: 120000, charge_date: '2023-12-01', dunning_date: '2026-05-09',
+      feedback: '承认欠款，要求分期', latest_progress: '需协商', next_plan: '提供分期计划',
+      work_nature: '生态修复', sector: '生态保护修复' }),
+  R({ id: 'r5', batch_id: 'b2', contract_no: 'SX2024-009', project_name: '运城市盐湖区第三次土壤普查外业采样',
+      owner_unit: '运城市农业农村局', client_attr: '政府部门--市',
+      project_status: '完工', debt_status: '正常', final_amount: 2360000, invoiced_amount: 2360000,
+      received_amount: 2360000, writeoff_amount: 0, charge_date: '2026-01-20', dunning_date: '2026-08-28',
+      feedback: '正在筹款，近期付', latest_progress: '已安排对账', collector: '孙勇军',
+      work_nature: '土工试验', sector: '实验测试' }),
+  R({ id: 'r6', batch_id: null, contract_no: 'SX2019-052', project_name: '长治市潞州区工民建岩土工程勘察（一期）',
+      owner_unit: '长治市城市建设开发有限公司', client_attr: '社会客户-省内',
+      project_status: '中止', debt_status: '逾期', final_amount: 980000, invoiced_amount: 980000,
+      received_amount: 200000, writeoff_amount: 0, charge_date: '2022-08-11', dunning_date: '2026-04-15',
+      feedback: '拒接电话', latest_progress: '停工', next_plan: '需实地调查',
+      work_nature: '工民建勘察', sector: '工程勘察与施工' }),
+  R({ id: 'r7', batch_id: null, contract_no: 'SX2025-031', project_name: '忻州市五台县铁矿资源储量核实物探',
+      owner_unit: '五台县兴旺铁矿有限公司', client_attr: '社会客户-省内',
+      project_status: '施工中', debt_status: '正常', final_amount: null, invoiced_amount: 420000,
+      received_amount: 0, charge_date: '2026-07-30', dunning_date: '', feedback: '',
+      latest_progress: '', next_plan: '', work_nature: '综合物探', sector: '能源资源勘查开发',
+      collector: '孙勇军' }),
+  R({ id: 'r8', batch_id: 'b2', contract_no: 'SX2022-140', project_name: '晋中市榆次区地下管线普查及信息化建设',
+      owner_unit: '晋中市城市管理局', client_attr: '政府部门--市',
+      project_status: '完工', debt_status: '逾期', final_amount: 5640000, invoiced_amount: 5100000,
+      received_amount: 2100000, writeoff_amount: 0, charge_date: '2024-05-27', dunning_date: '2026-07-18',
+      feedback: '对质量提出异议', latest_progress: '需协商', next_plan: '升级催收手段',
+      work_nature: '其他测绘', sector: '测绘地理信息', department_id: 'd3', creditor_unit: '测绘院' }),
+  R({ id: 'r9', batch_id: null, contract_no: 'SX2018-088', project_name: '太原市杏花岭区基础施工降水工程',
+      owner_unit: '太原市排水管理处', client_attr: '政府部门--市',
+      project_status: '取消或作废', debt_status: '逾期', final_amount: 336000, invoiced_amount: 336000,
+      received_amount: 0, writeoff_amount: 0, charge_date: '2021-10-09', dunning_date: '2026-03-02',
+      feedback: '拒接电话', latest_progress: '移交法务部', next_plan: '申请财产保全',
+      work_nature: '基础施工', sector: '工程勘察与施工', department_id: 'd4' }),
+  R({ id: 'r10', batch_id: null, contract_no: 'SX2026-002', project_name: '阳泉市盂县地质灾害隐患点排危除险勘查设计',
+      owner_unit: '盂县自然资源局', client_attr: '政府部门--县',
+      project_status: '施工中', debt_status: '正常', final_amount: null, invoiced_amount: 150000,
+      received_amount: 0, charge_date: '2026-08-25', dunning_date: '', feedback: '',
+      latest_progress: '已安排对账', next_plan: '跟踪付款进度', department_id: 'd1',
+      work_nature: '报告编写、设计方案', sector: '地质灾害治理' })
+];
+
+const ATTACH = {
+  r1: { '决算': 2, '中止证明': 1 },
+  r2: { '决算': 1 },
+  r4: { '中止证明': 3 },
+  r6: { '决算': 1, '其他': 2 }
+};
+
+/* 最小可用的 PostgREST 链式替身 */
+function chain(result) {
+  const o = {
+    select: () => o, order: () => o, limit: () => o, eq: () => o,
+    maybeSingle: () => Promise.resolve(result),
+    then: (res, rej) => Promise.resolve(result).then(res, rej)
+  };
+  return o;
+}
+const sb = { from: () => chain({ data: [], error: null }) };
+
+const Auth = {
+  isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1' }, perms: {},
+  can: () => true
+};
+const App = { navigate() {} };
+/* 注意：Editor 由 ledger.js 自己声明（编辑弹窗在同一文件），此处不可重复声明 */
+const Importer = { open() {} };
+const Exporter = { open() {} };
+const Batches = { load() {} };
+
+(async () => {
+  // 字典走内置兜底（不连库）；附件计数直接注入
+  Attachments.countMap = ATTACH;
+
+  Ledger.rows = location.hash === '#empty' ? [] : ROWS.slice();
+  if (location.hash === '#many') {              // 造 60 行，验证纵向滚动下的表头/合计条冻结
+    Ledger.rows = [];
+    for (let k = 0; k < 6; k++) {
+      ROWS.forEach((r, i) => Ledger.rows.push(Object.assign({}, r, {
+        id: r.id + '_' + k, contract_no: r.contract_no + '-' + (k + 1)
+      })));
+    }
+  }
+  Ledger.departments = DEPTS.slice();
+  Ledger.filters.settled = '全部';
+
+  if (location.hash === '#core') {
+    ColPrefs.hidden = new Set(
+      [...FIELD_DEFS, ...COMPUTED_DEFS].map(f => f.key).filter(k => !ColPrefs.coreKeys().includes(k)));
+  }
+
+  await Ledger.init().catch(() => {});
+  Ledger.render();
+
+  const wrap = document.querySelector('.table-wrap');
+
+  if (wrap) {
+    if (location.hash === '#scrolled') wrap.scrollLeft = 320;
+    if (location.hash === '#far') wrap.scrollLeft = wrap.scrollWidth;
+    if (location.hash === '#many') { wrap.scrollLeft = 300; wrap.scrollTop = 260; }
+  }
+
+  if (location.hash === '#measure' && wrap) {
+    const t = wrap.querySelector('table');
+    const box = el => {
+      const r = el.getBoundingClientRect();
+      return 'x' + Math.round(r.left) + ' w' + Math.round(r.width);
+    };
+    const bg = el => (el ? getComputedStyle(el).backgroundColor.replace(/^rgba?(|)$/g, '') : 'null');
+    const row1 = t.querySelectorAll('tbody tr')[0];
+    const head = [...t.querySelectorAll('thead th')].slice(0, 4).map(e =>
+      (e.textContent.trim() || '☑') + ' ' + box(e));
+    const body = [...row1.children].slice(0, 4).map(box);
+    const act = [...row1.children].slice(-1).map(e => '操作 ' + box(e));
+    const foot = [...t.querySelectorAll('tfoot td')].slice(0, 3).map(box);
+    /* 关键：区分「自然位置」与「吸附位置」。
+       sticky 元素在 scrollLeft=0 时停在自然位置；只有滚动超过阈值才会被吸附。
+       所以必须同时打印容器与表格自身的左边界，否则会把自然位置误读成穿帮。 */
+    const cls = e => (String(e.className).trim() || '-');
+    const dump = (list, n) => [...list].slice(0, n)
+      .map((e, i) => i + ':' + cls(e) + ' ' + box(e)).join(' | ');
+    const widths = sel => [...t.querySelectorAll(sel)].map(e => Math.round(e.getBoundingClientRect().width));
+    const uniq = a => [...new Set(a)];
+    const ck = widths('.col-check'), ix = widths('.col-idx');
+    const txt = [
+      /* 自然位置基准：wrap 左边界 / 表格自身左边界。
+         scrollLeft=0 时冻结列就停在自然位置，x 不相等是正常的，不算穿帮。 */
+      'base  wrap' + box(wrap) + '  table' + box(t),
+      'THn   ' + dump(t.querySelectorAll('thead th'), 6),
+      'TDn   ' + dump(row1.children, 6),
+      'TH    ' + head.join(' | '),
+      'TD1   ' + body.join(' | '),
+      'ACT   ' + act.join(' | '),
+      'FOOT  ' + foot.join(' | '),
+      'col-check 宽度集合 ' + JSON.stringify(uniq(ck)) + '（应恒为 [36]）',
+      'col-idx   宽度集合 ' + JSON.stringify(uniq(ix)) + '（应恒为 [40]）',
+      '冻结区右边界 x=' + Math.round(t.querySelector('tbody td.col-idx').getBoundingClientRect().right) +
+        '  下一列左边界 x=' + Math.round(row1.children[2].getBoundingClientRect().left) +
+        '  → 间隙 ' + (row1.children[2].getBoundingClientRect().left -
+        t.querySelector('tbody td.col-idx').getBoundingClientRect().right).toFixed(1) + 'px（应为 0）',
+      'table scrollW=' + t.scrollWidth + ' clientW=' + t.clientWidth +
+        ' | wrap scrollW=' + wrap.scrollWidth + ' clientW=' + wrap.clientWidth +
+        ' scrollH=' + wrap.scrollHeight + ' clientH=' + wrap.clientHeight,
+      'wrap scrollLeft=' + wrap.scrollLeft + ' max=' + (wrap.scrollWidth - wrap.clientWidth) +
+        ' | class="' + wrap.className + '"',
+      /* 自检：滚动水位类名是否随位置正确切换（决定冻结列/操作列的投影）。
+         注意 scroll 事件是异步派发的，这里必须显式调一次 syncOverflow，
+         否则读到的是滚动前的旧类名。 */
+      (function () {
+        const snap = () => { Ledger.syncOverflow(); return wrap.className; };
+        wrap.scrollLeft = 0;   const at0 = snap();
+        wrap.scrollLeft = 320; const at320 = snap();
+        wrap.scrollLeft = wrap.scrollWidth; const atEnd = snap();
+        wrap.scrollLeft = 0; snap();
+        return 'class 随滚动位置 —— 0:[' + at0 + '] 320:[' + at320 + '] 末端:[' + atEnd + ']';
+      })(),
+      /* 配色核对：直接读计算值，比截图取色可靠 */
+      'backgroundColor —— 表头=' + bg(t.querySelector('thead th[data-sort]')) +
+        ' 冻结表头=' + bg(t.querySelector('thead th.col-idx')) +
+        ' 普通行=' + bg(t.querySelector('tbody tr:nth-child(3) td:nth-child(3)')) +
+        ' 斑马行=' + bg(t.querySelector('tbody tr:nth-child(4) td:nth-child(3)')) +
+        ' 合计行=' + bg(t.querySelector('tfoot td:nth-child(2)')),
+      'body 高度=' + document.body.scrollHeight + '（应≈视口高度，页面不该出现第二条滚动条）'
+    ].join('\n');
+    const d = document.createElement('pre');
+    d.style.cssText = 'position:fixed;inset:0 0 auto 0;z-index:9999;margin:0;padding:8px 12px;' +
+      'max-height:100%;overflow:hidden;' +
+      'background:#fff;color:#111;border-bottom:2px solid #c00;font:11px/1.65 monospace;white-space:pre-wrap';
+    d.textContent = 'MEASURE>>\n' + txt;
+    document.body.appendChild(d);
+  }
+
+  document.title = '台账总览预览 · 已渲染';
+  document.body.dataset.ready = '1';
+})();
+</script>
+</body>
+</html>

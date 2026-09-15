@@ -95,10 +95,11 @@
 
   /* 表格行底色（供冻结列继承，避免透明穿帮） */
   --row-bg: var(--surface);
-  --row-alt: var(--surface-2);
-  --row-hover: oklch(97.6% 0.012 258);
+  --row-alt: oklch(97.7% 0.006 258);   /* 斑马行：原为 surface-2（98.1%），与白底差 1.3% 实际看不出来 */
+  --row-hover: oklch(96.5% 0.013 258); /* 必须比斑马行更深，否则偶数行 hover 反而变浅 */
   --row-checked: var(--primary-soft);
   --thead-bg: var(--surface-3);
+  --thead-fc-bg: oklch(93.6% 0.010 258); /* 冻结区表头（比表头底再深一档，标示"这列被冻住了"） */
   --foot-bg: oklch(96.2% 0.010 258);
 }
 
@@ -301,6 +302,21 @@ select.ipt { padding-right: 26px; cursor: pointer; }
 .user-name { font-size: var(--t-sm); font-weight: 500; color: var(--ink-700); }
 
 .page-container { padding: var(--s4) var(--s5) var(--s7); flex: 1; min-width: 0; }
+/* 台账总览：让表格吃掉剩余高度，页面自己不再产生第二条滚动条
+   （旧实现用 max-height: calc(100vh - 252px) 猜顶部控件高度，加一行筛选就错位）。
+   注意只给 #page-ledger 挂弹性链，不动 .page-container —— 否则看板等长页面
+   会被压成"视口高 + 内容溢出"，容器自身的底部内边距就白给了。
+   height:100% 能生效，是因为 .page-container 在 .app-main 里由 flex 定高。 */
+#page-ledger:not(.hidden) {
+  display: flex; flex-direction: column; height: 100%; min-height: 0;
+}
+#page-ledger #ledger-table-box { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* 表格卡片贴着数据收边（内容高就撑满、超出才出现内滚动），
+   而不是拉成一个大白框、让合计行孤零零浮在中间 */
+#page-ledger .table-wrap { flex: 0 1 auto; min-height: 0; max-height: 100%; }
+/* 空状态没有"数据高度"可贴，若仍按内容收边就会在下方留一大片空白；
+   这里让它吃掉剩余高度，把引导文案在可视区正中呈现 */
+#page-ledger .table-wrap.is-empty { flex: 1 1 auto; max-height: 100%; }
 .page-head { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s3); flex-wrap: wrap; }
 .page-head h2 { font-size: var(--t-md); font-weight: 600; letter-spacing: -0.01em; }
 .page-head h3 { font-size: var(--t-base); }
@@ -331,12 +347,13 @@ select.ipt { padding-right: 26px; cursor: pointer; }
 }
 .batch-chip a { margin-left: var(--s1); font-weight: 600; color: inherit; }
 
+/* 筛选区：5 行胶囊本身已占掉不少竖向空间，行距收紧一档把表格往上提 */
 .capsule-row {
-  display: flex; align-items: center; gap: var(--s1) 5px; flex-wrap: wrap;
-  margin-bottom: 6px;
+  display: flex; align-items: center; gap: 3px 5px; flex-wrap: wrap;
+  margin-bottom: 4px;
 }
 .capsule-label {
-  font-size: var(--t-xs); color: var(--ink-500);
+  font-size: var(--t-xs); color: var(--ink-400);
   width: 56px; flex-shrink: 0; letter-spacing: 0.02em;
 }
 .capsule {
@@ -351,11 +368,20 @@ select.ipt { padding-right: 26px; cursor: pointer; }
 .capsule.active {
   background: var(--primary); border-color: var(--primary); color: var(--surface); font-weight: 500;
 }
+/* 默认值（全部 / 未结）被选中时用淡色：实心蓝只表示"这一维真的筛过"，
+   否则 5 行胶囊各挂一颗实心蓝，颜色不再承载任何信息 */
+.capsule.active.is-default {
+  background: var(--primary-soft); border-color: var(--primary-line);
+  color: var(--primary); font-weight: 500;
+}
+.capsule.active.is-default:hover {
+  background: oklch(92.5% 0.042 258); border-color: var(--primary);
+}
 
 /* ---------- 表格容器 ---------- */
 .table-wrap {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2);
-  overflow: auto; box-shadow: var(--sh1);
+  overflow: auto; box-shadow: var(--sh1); overscroll-behavior: contain;
   max-height: calc(100vh - 252px);
 }
 .ledger-table, .map-table, .batch-table, .admin-table, .invoice-table {
@@ -395,23 +421,49 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 }
 .ledger-table tbody tr:last-child td { border-bottom: none; }
 
-/* 冻结：左侧勾选+序号，右侧操作列（横向滚动时保持可见） */
+/* 冻结列：左侧「勾选 + 序号」，右侧「操作」。
+   ⚠️ 冻结列的【实际宽度】必须与 left 偏移严格相等。
+   本表是 table-layout:auto，浏览器会把声明宽度向内容最小宽度回缩
+   （勾选列声明 36px、实际只画到 29px），此时只写 width 会让冻结列
+   比偏移窄，两列之间露出一条正在横向滚动的单元格 —— 表现为
+   「序号冻结后左边有一片空白 / 穿帮」。故宽度只定义一次，三处锁死。 */
+.ledger-table {
+  --fc-check: 36px;                              /* 勾选列宽 */
+  --fc-idx: 40px;                                /* 序号列宽 */
+  --fc-act: 104px;                               /* 操作列宽 */
+  --fc-w: calc(var(--fc-check) + var(--fc-idx)); /* 冻结区总宽 */
+}
 .ledger-table th.col-check, .ledger-table td.col-check {
-  position: sticky; left: 0; z-index: 3; width: 36px;
+  position: sticky; left: 0; z-index: 3;
+  width: var(--fc-check); min-width: var(--fc-check); max-width: var(--fc-check);
+  text-align: center;
 }
 .ledger-table th.col-idx, .ledger-table td.col-idx {
-  position: sticky; left: 36px; z-index: 3; width: 40px;
+  position: sticky; left: var(--fc-check); z-index: 3;
+  width: var(--fc-idx); min-width: var(--fc-idx); max-width: var(--fc-idx);
+  text-align: center; color: var(--ink-500); font-size: var(--t-xs);
   box-shadow: inset -1px 0 0 var(--line);
 }
-.ledger-table thead th.col-check, .ledger-table thead th.col-idx { z-index: 8; }
 .ledger-table th.col-actions, .ledger-table td.col-actions {
-  position: sticky; right: 0; z-index: 3; width: 118px;
+  position: sticky; right: 0; z-index: 3;
+  width: var(--fc-act); min-width: var(--fc-act); max-width: var(--fc-act);
   box-shadow: inset 1px 0 0 var(--line);
 }
+.ledger-table thead th.col-check, .ledger-table thead th.col-idx,
 .ledger-table thead th.col-actions { z-index: 8; }
+/* 冻住的两列：表头底色再深一档，与右侧滑动区分开 */
+.ledger-table thead th.col-check, .ledger-table thead th.col-idx { background: var(--thead-fc-bg); }
 
-.col-check { text-align: center; }
-.col-idx { text-align: center; color: var(--ink-400); font-size: var(--t-xs); }
+/* 横向滚动提示：只在确实还有内容被滚出去的那一侧投影（类名由 ledger.js 的 syncOverflow 维护） */
+.table-wrap.is-scrolled .ledger-table th.col-idx,
+.table-wrap.is-scrolled .ledger-table td.col-idx {
+  box-shadow: inset -1px 0 0 var(--line), 12px 0 14px -12px oklch(21% 0.03 258 / 0.22);
+}
+.table-wrap.has-more .ledger-table th.col-actions,
+.table-wrap.has-more .ledger-table td.col-actions {
+  box-shadow: inset 1px 0 0 var(--line), -12px 0 14px -12px oklch(21% 0.03 258 / 0.22);
+}
+
 .col-actions { text-align: center; white-space: nowrap; }
 .col-actions a { margin: 0 5px; font-size: var(--t-xs); }
 .link-danger { color: var(--danger); }
@@ -422,23 +474,56 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 .td-money.neg { color: var(--danger); }
 .td-date { color: var(--ink-600); font-variant-numeric: tabular-nums; }
 .td-name { line-height: 1.45; white-space: normal; word-break: break-word; }
-.td-foot {
-  font-weight: 600; background: var(--foot-bg) !important;
-  border-top: 1px solid var(--line-2); color: var(--ink-950);
+/* 合计行：原本只有金额格带底纹，中间一格一格是透明的，视觉上像一条
+   「断成几截的空白带」；改为整条铺满，并固定在表格底部当作实时合计条 */
+.ledger-table tfoot td {
+  position: sticky; bottom: 0; z-index: 4;
+  background: var(--foot-bg);
+  border-top: 1px solid var(--line-2);
+  box-shadow: inset 0 1px 0 var(--line);
 }
-.td-foot-label {
-  position: sticky; left: 0; z-index: 3;
-  background: var(--foot-bg); font-weight: 600; color: var(--ink-600);
-  box-shadow: inset -1px 0 0 var(--line);
+.td-foot { font-weight: 600; color: var(--ink-950); }
+.ledger-table tfoot td.td-foot-label {
+  left: 0; z-index: 6;
+  font-weight: 600; color: var(--ink-600);
+  box-shadow: inset 0 1px 0 var(--line), inset -1px 0 0 var(--line);
+}
+.table-wrap.is-scrolled .ledger-table tfoot td.td-foot-label {
+  box-shadow: inset 0 1px 0 var(--line), inset -1px 0 0 var(--line),
+              12px 0 14px -12px oklch(21% 0.03 258 / 0.22);
 }
 .empty-cell {
-  text-align: center; color: var(--ink-500); padding: var(--s6) var(--s4) !important;
-  font-size: var(--t-sm); line-height: 1.8; background: var(--surface);
+  text-align: center; color: var(--ink-500); padding: var(--s7) var(--s4) !important;
+  font-size: var(--t-sm); line-height: 1.9; background: var(--surface);
 }
 .empty-cell::before {
-  content: "—"; display: block; font-size: 20px; color: var(--ink-300); margin-bottom: 6px;
+  content: "▤"; display: block; margin: 0 auto var(--s3);
+  width: 36px; height: 36px; line-height: 34px;
+  font-size: 15px; color: var(--ink-400);
+  border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface-2);
 }
-.table-status { margin-top: var(--s2); font-size: var(--t-xs); color: var(--ink-500); }
+.empty-cell b { color: var(--ink-700); font-weight: 600; }
+/* 台账空状态用独立面板：这张表宽可达 3000px+，
+   <td colspan="N"> 里的居中内容会落在整表中点（可视区之外），等于一片空白 */
+.table-wrap.is-empty {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 220px; padding: var(--s6) var(--s4);
+}
+.empty-state { text-align: center; max-width: 440px; }
+.es-badge {
+  display: block; width: 40px; height: 40px; margin: 0 auto var(--s3);
+  line-height: 38px; font-size: 17px; color: var(--ink-400);
+  border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface-2);
+}
+.es-title { font-size: var(--t-base); font-weight: 600; color: var(--ink-700); }
+.es-hint { margin-top: 6px; font-size: var(--t-sm); color: var(--ink-500); line-height: 1.75; }
+.table-status {
+  display: flex; align-items: baseline; gap: var(--s3);
+  margin-top: var(--s2); padding: 0 2px;
+  font-size: var(--t-xs); color: var(--ink-500);
+}
+.table-status .ts-right { margin-left: auto; color: var(--ink-400); }
+.table-status b { color: var(--ink-700); font-weight: 600; font-variant-numeric: tabular-nums; }
 /* .row-admin 的整行粉色底已移除：斑马行 + 首列竖标记已足够，染色反而形成色块 */
 .att-has { color: var(--primary); font-weight: 500; }
 
@@ -1075,7 +1160,8 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   .ledger-table th.col-check, .ledger-table td.col-check,
   .ledger-table th.col-idx, .ledger-table td.col-idx,
   .ledger-table th.col-actions, .ledger-table td.col-actions,
-  .td-foot-label { position: static; box-shadow: none; }
+  .ledger-table tfoot td, .td-foot-label { position: static; box-shadow: none; }
+  #page-ledger .table-wrap { min-height: 0; }
 }
 @media (max-width: 460px) {
   .topbar-user .user-name { display: none; }
@@ -1098,6 +1184,9 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   }
   .ledger-table thead { display: table-header-group; }
   .ledger-table thead th { position: static; box-shadow: none; background: #f2f4f7; }
+  /* 纸上没有冻结列这回事，全部退回普通流 */
+  .ledger-table th.col-idx, .ledger-table td.col-idx,
+  .ledger-table tfoot td, .td-foot-label { position: static; box-shadow: none; }
   .ledger-table tbody tr, .dash-table tr { break-inside: avoid; }
   .ledger-table td, .ledger-table th { border-color: #ccc; }
   /* 用户表：纸上没有横向滚动，退回自动列宽并允许换行，避免账号/部门被省略号吃掉 */
@@ -1138,6 +1227,123 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   <b>拖动浏览器窗口改变宽度，图表内文字应保持同一大小</b>（本次修复的正是这一点）
 </div>
 <div id="root"></div>
+<script>/**
+ * fields.js - 台账字段定义（新指标体系 v3，依据《应收系统统计指标.xlsx》28 列）
+ *
+ * 台账表格 / 编辑表单 / Excel 导入映射 / 导出 共用。
+ *
+ * type: text | money | date | select | combo | textarea
+ *   - select: 下拉选择（dict 指定 ar_dict 类别；freeOther=true 时带「其他」自由填写）
+ *   - combo : 可输可选（datalist，dict 选项作建议，允许自由输入）
+ * width: 表格列宽（px）；money/date 列右对齐
+ * aliases: Excel 导入时用于自动匹配的候选表头名
+ * dict: 选项字典类别（ar_dict.category，选项可由财务管理员在「选项管理」页编辑）
+ * deptEditable: 实体部门（非管理员）可编辑（要求五：仅催收跟踪类字段）
+ *
+ * 自动计算口径（要求：账内应收 = 开票金额 − 到账金额；账外应收 = 决算金额 − 开票金额）：
+ *   receivable_internal / receivable_external / receivable_balance 均为虚拟计算列，不入库。
+ *
+ * 旧版字段（合同金额/开工完工日期/工程进度/付款节点/成本费用/应收合计/催收反馈等）
+ * 数据库保留、界面隐藏，需要时可随时恢复。
+ */
+
+const FIELD_DEFS = [
+  /* ---- 基本信息 ---- */
+  { key: 'contract_no',    label: '合同编号',     type: 'text',   width: 110, aliases: ['合同编号', '编号', '合同号'] },
+  { key: 'project_name',   label: '项目名称',     type: 'text',   width: 200, clamp: true, aliases: ['项目名称', '项目', '工程项目'] },
+  { key: 'owner_unit',     label: '客户名称',     type: 'text',   width: 170, aliases: ['客户名称', '甲方单位', '甲方', '建设单位'], datalist: true },
+  { key: 'client_attr',    label: '客户属性',     type: 'select', width: 96,  dict: 'client_attr', freeOther: true, aliases: ['客户属性'] },
+  { key: 'creditor_unit',  label: '单位',         type: 'combo',  width: 130, dict: 'unit', aliases: ['单位', '债权单位', '乙方单位'] },
+  { key: 'work_nature',    label: '工作性质',     type: 'combo',  width: 96,  dict: 'work_nature', aliases: ['工作性质', '性质'] },
+  { key: 'sector',         label: '八大板块',     type: 'combo',  width: 96,  dict: 'sector', aliases: ['八大板块', '板块'] },
+
+  /* ---- 状态与金额 ---- */
+  { key: 'project_status', label: '项目状态',     type: 'select', width: 88,  dict: 'project_status', freeOther: true,
+    deptEditable: true, aliases: ['项目状态', '工程进度'] },
+  { key: 'final_method',   label: '决算方式',     type: 'select', width: 92,  dict: 'final_method', freeOther: true,
+    deptEditable: true, aliases: ['决算方式'] },
+  { key: 'charge_date',    label: '最新挂账时间', type: 'date',   width: 108,
+    aliases: ['最新挂账时间', '挂账时间', '挂账日期'], note: '= 最近一笔开票日期，登记开票明细时自动维护' },
+  { key: 'final_amount',   label: '决算金额',     type: 'money',  width: 92,  aliases: ['决算金额'] },
+  { key: 'invoiced_amount',label: '开票金额',     type: 'money',  width: 92,  aliases: ['开票金额', '已开发票金额'] },
+  { key: 'received_amount',label: '到账金额',     type: 'money',  width: 92,  aliases: ['到账金额', '已到账金额', '已回款'] },
+  { key: 'writeoff_amount',label: '核销金额',     type: 'money',  width: 92,  aliases: ['核销金额', '核销'] },
+
+  /* ---- 债权与催收（实体部门可编辑区） ---- */
+  { key: 'debt_status',    label: '债权状态',     type: 'select', width: 88,  dict: 'debt_status', freeOther: true,
+    deptEditable: true, aliases: ['债权状态'] },
+  { key: 'collector',      label: '清收责任人',   type: 'text',   width: 100,
+    deptEditable: true, aliases: ['清收责任人', '责任人'] },
+  { key: 'dunning_date',   label: '最新催收时间', type: 'date',   width: 108,
+    deptEditable: true, aliases: ['最新催收时间', '催收时间', '催收/询证日期', '催收日期', '询证日期'] },
+  { key: 'comm_method',    label: '沟通方式',     type: 'select', width: 104, dict: 'comm_method', freeOther: true,
+    deptEditable: true, aliases: ['沟通方式'] },
+  { key: 'feedback',       label: '对方反馈',     type: 'select', width: 150, dict: 'feedback', freeOther: true,
+    deptEditable: true, aliases: ['对方反馈', '反馈'] },
+  { key: 'latest_progress',label: '最新进展',     type: 'select', width: 140, dict: 'progress_note', freeOther: true,
+    deptEditable: true, aliases: ['最新进展', '进展'] },
+  { key: 'next_plan',      label: '下一步计划',   type: 'select', width: 130, dict: 'next_plan', freeOther: true,
+    deptEditable: true, aliases: ['下一步计划', '计划'] },
+  { key: 'remark',         label: '备注',         type: 'textarea', width: 150, aliases: ['备注'] },
+];
+
+/* 自动计算列（不对应数据库字段，前端实时计算） */
+const COMPUTED_DEFS = [
+  { key: 'receivable_internal', label: '账内应收金额', type: 'money', width: 102, formula: '= 开票 − 到账' },
+  { key: 'receivable_external', label: '账外应收金额', type: 'money', width: 102, formula: '= 决算 − 开票' },
+  { key: 'receivable_balance',  label: '应收余额',     type: 'money', width: 96,  formula: '= 决算 − 到账 − 核销' },
+  { key: 'attach_summary',      label: '附件类别及数量', type: 'text',  width: 130 },
+];
+
+const ALL_FIELDS = FIELD_DEFS.map(f => f.key);
+
+const MONEY_KEYS = FIELD_DEFS.filter(f => f.type === 'money').map(f => f.key);
+
+/* 编辑表单分组（要求一：一个项目一个界面，按业务分区展示全部要素） */
+const FORM_GROUPS = [
+  { key: 'base',    label: '基本信息', fields: ['contract_no', 'project_name', 'owner_unit', 'client_attr', 'creditor_unit', 'work_nature', 'sector'] },
+  { key: 'finance', label: '状态与金额', fields: ['project_status', 'final_method', 'charge_date', 'final_amount', 'invoiced_amount', 'received_amount', 'writeoff_amount'] },
+  { key: 'dunning', label: '债权与催收', fields: ['debt_status', 'collector', 'dunning_date', 'comm_method', 'feedback', 'latest_progress', 'next_plan', 'remark'] },
+];
+
+/* 字典类别定义（「选项管理」页展示顺序与说明） */
+const DICT_CATEGORIES = [
+  { key: 'project_status',  label: '项目状态' },
+  { key: 'final_method',    label: '决算方式' },
+  { key: 'debt_status',     label: '债权状态' },
+  { key: 'client_attr',     label: '客户属性' },
+  { key: 'comm_method',     label: '沟通方式' },
+  { key: 'feedback',        label: '对方反馈' },
+  { key: 'progress_note',   label: '最新进展' },
+  { key: 'next_plan',       label: '下一步计划' },
+  { key: 'attach_category', label: '附件类别' },
+  { key: 'unit',            label: '单位（债权单位）' },
+  { key: 'work_nature',     label: '工作性质' },
+  { key: 'sector',          label: '八大板块' },
+];
+
+/* 客户名称建议（内置 + 库内历史值自动并入 datalist） */
+const OWNER_UNIT_PRESETS = [
+  '山西省第十地质工程勘察院',
+];
+
+/* 权限定义（左侧权限栏 + 管理员授权页共用） */
+const PERM_DEFS = [
+  { key: 'view',     label: '查看本部门台账' },
+  { key: 'view_all', label: '查看全部台账' },
+  { key: 'add',      label: '新增记录' },
+  { key: 'edit',     label: '编辑记录' },
+  { key: 'delete',   label: '删除记录' },
+  { key: 'import',   label: 'Excel 导入' },
+  { key: 'export',   label: '导出 Excel' },
+];
+
+/* 标签颜色映射（表格中状态列的胶囊配色） */
+const TAG_COLORS = {
+  '完工': 'tag-green', '施工中': 'tag-blue', '中止': 'tag-orange', '取消或作废': 'tag-gray',
+  '正常': 'tag-green', '逾期': 'tag-overdue', '诉讼': 'tag-red', '和解': 'tag-teal',
+};
+</script>
 <script>/**
  * utils.js - 通用工具（格式化 / DOM / 提示 / 确认框 / 防抖）
  */

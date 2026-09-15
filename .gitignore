@@ -5,6 +5,9 @@
 Thumbs.db
 .workbuddy/
 
+# 无头浏览器验证的临时产物（截图 / profile / 探针脚本）
+.chrometmp/
+
 # 二进制文件不入库：vendor 走 CDN 回退，导入模板由前端动态生成，正式部署时直接复制本地文件
 vendor/
 template/
