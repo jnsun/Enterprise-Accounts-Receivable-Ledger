@@ -64,9 +64,14 @@ const Dashboard = {
       .filter(([, v]) => v > 0)
       .sort((a, b) => b[1] - a[1]);
 
-    /* 催收跟踪 TOP10：应收余额 > 0，优先逾期，再按最新催收时间最早 */
+    /* 催收跟踪 TOP10：欠款 > 0，优先逾期，再按最新催收时间最早
+       欠款口径：决算已定 = 应收余额；决算未定 = 账内应收（开票−到账，照样要催） */
+    const owedOf = r => {
+      const b = comp(r).receivable_balance;
+      return b === null ? comp(r).receivable_internal : b;
+    };
     const tracking = rows
-      .filter(r => comp(r).receivable_balance > 0)
+      .filter(r => owedOf(r) > 0)
       .sort((a, b) => {
         const ra = a.debt_status === '逾期' ? 0 : 1, rb = b.debt_status === '逾期' ? 0 : 1;
         if (ra !== rb) return ra - rb;
@@ -119,7 +124,7 @@ const Dashboard = {
       <div class="dash-card">
         <div class="dash-card-head">
           <h3>催收跟踪 TOP10</h3>
-          <span class="muted">逾期优先 · 再按最新催收时间从早到晚</span>
+          <span class="muted">逾期优先 · 再按最新催收时间从早到晚 · 决算未定按账内应收计</span>
         </div>
         <div class="table-wrap">
           <table class="ledger-table dash-table">
@@ -139,7 +144,7 @@ const Dashboard = {
                     <td title="${Utils.escapeHtml(r.contract_no || '')}">${Utils.escapeHtml(r.contract_no || '—')}</td>
                     <td class="td-name" title="${Utils.escapeHtml(r.project_name || '')}">${Utils.escapeHtml(Utils.clampName(r.project_name || '（未填项目）'))}</td>
                     <td>${Utils.escapeHtml(Ledger.deptNameOf(r))}</td>
-                    <td class="ta-r td-money owed">${Utils.fmtMoney(comp(r).receivable_balance)}</td>
+                    <td class="ta-r td-money owed" ${comp(r).receivable_balance === null ? 'title="决算未定，此处为账内应收（开票−到账）"' : ''}>${Utils.fmtMoney(owedOf(r))}${comp(r).receivable_balance === null ? '<span class="muted">*</span>' : ''}</td>
                     <td class="ta-r">${r.debt_status ? `<span class="tag ${TAG_COLORS[r.debt_status] || 'tag-gray'}">${Utils.escapeHtml(r.debt_status)}</span>` : '—'}</td>
                     <td class="ta-r">${Utils.escapeHtml(r.dunning_date || '—')}</td>
                     <td>${Utils.escapeHtml(r.collector || '—')}</td>
