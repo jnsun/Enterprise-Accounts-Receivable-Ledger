@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>数据看板预览 · 企业应收账款台账系统</title>
+<title>选项管理预览 · 企业应收账款台账系统</title>
 <style>
 /* ==========================================================================
    企业应收账款台账系统 · 样式表
@@ -820,7 +820,9 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   color: var(--primary); font-weight: 600;
 }
 .dc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dc-num { font-size: var(--t-xs); color: var(--ink-400); font-variant-numeric: tabular-nums; }
+/* 项数固定宽度右对齐：否则「4」和「15」宽度不同，名称列会跟着前后差几像素，
+   12 行的左缘看起来就会参差 */
+.dc-num { width: 22px; flex-shrink: 0; text-align: right; font-size: var(--t-xs); color: var(--ink-400); font-variant-numeric: tabular-nums; }
 .dc-item.is-active .dc-num { color: var(--primary); }
 /* 已自定义（已在 ar_dict 落库）用实心点，内置默认用空心点 */
 .dc-dot {
@@ -1325,15 +1327,20 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   .ledger-table tfoot td, .td-foot-label { position: static; box-shadow: none; }
   #page-ledger .table-wrap { min-height: 0; }
   /* 选项管理：窄屏改为上下堆叠，类别索引变横向滚动条 —— 212px 固定左栏
-     在 600px 以下会把选项内容挤到放不下 */
-  #page-dict .dict-panel { grid-template-columns: 1fr; min-height: 0; }
-  .dict-cats { border-right: none; border-bottom: 1px solid var(--line); }
+     在 600px 以下会把选项内容挤到放不下。
+     ⚠ 必须是 minmax(0, 1fr) 而不是 1fr：1fr 等价于 minmax(auto, 1fr)，
+     auto 的下限取内容的 min-content —— 而不换行的横向胶囊行的 min-content
+     就是 12 个胶囊宽度之和（实测 1337px），整张面板会被撑到视口外，
+     保存按钮与操作列全部跑到屏幕右边看不见。min-width:0 同理。 */
+  #page-dict .dict-panel { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .dict-cats { min-width: 0; border-right: none; border-bottom: 1px solid var(--line); }
   .dc-head { display: none; }
   .dc-list {
-    display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
-    padding: 0; flex: 0 0 auto;
+    min-width: 0; display: flex; flex-wrap: nowrap;
+    overflow-x: auto; overflow-y: hidden; padding: 0; flex: 0 0 auto;
   }
-  .dc-item { width: auto; border-left: none; border-bottom: 2px solid transparent; padding: 8px 12px; }
+  /* 胶囊不参与收缩：宁可横向滚动，也不要把名称压成省略号 */
+  .dc-item { flex: 0 0 auto; width: auto; border-left: none; border-bottom: 2px solid transparent; padding: 8px 12px; }
   .dc-item.is-active { border-left-color: transparent; border-bottom-color: var(--primary); }
   .dc-legend { display: none; }
 }
@@ -1392,23 +1399,54 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   }
 }
 
-/* —— 预览页专属：仅用于说明，不属于产品样式 —— */
+/* —— 预览页专属，不属于产品样式 —— */
+body { margin: 0; padding: 0; background: var(--surface-2); }
 .preview-note {
-  position: sticky; top: 0; z-index: 99;
-  padding: 7px 16px; font-size: 12px; line-height: 1.6;
+  padding: 7px 18px; font-size: 12px; line-height: 1.7;
   background: oklch(96% 0.03 258); color: oklch(38% 0.09 258);
   border-bottom: 1px solid oklch(86% 0.065 258);
 }
 .preview-note b { font-weight: 600; }
+.preview-note code { background: oklch(93% 0.02 258); padding: 1px 4px; border-radius: 3px; }
+/* 与外层真实骨架一致：固定高度而非 100vh（无头截图下视口高不稳定） */
+.preview-shell { height: 900px; min-height: 0; overflow: hidden; }
+.preview-shell .sidebar { height: 100%; }
+.preview-shell .page-container { height: 100%; min-height: 0; }
 </style>
 </head>
 <body>
 <div class="preview-note">
-  <b>看板视觉预览</b> · 数据为模拟数据（不连数据库、不发请求）· 内容与真实系统同源：
-  <code>css/style.css</code> + <code>js/dashboard.js</code> ·
-  <b>拖动浏览器窗口改变宽度，图表内文字应保持同一大小</b>（本次修复的正是这一点）
+  <b>选项管理页视觉预览</b> · 模拟字典数据，不连数据库 ·
+  与真实系统同源：<code>css/style.css</code> + <code>js/dictadmin.js</code> ·
+  <code>#managed</code> 已入库类别 · <code>#many</code> 18 项长列表 ·
+  <code>#dirty</code> 未保存状态 · <code>#confirm</code> 删除确认 · <code>#measure</code> 打印几何测量
 </div>
-<div id="root"></div>
+<div class="app-shell preview-shell">
+  <aside class="sidebar">
+    <div class="side-brand">企业应收账款<br>台账系统</div>
+    <nav class="side-nav">
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">▦</span><span>数据看板</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">▤</span><span>台账总览</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">⇪</span><span>Excel 导入</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">☰</span><span>导入批次管理</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">⚿</span><span>用户管理</span></button>
+      <button class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true">◈</span><span>选项管理</span></button>
+      <button class="nav-item"><span class="nav-icon" aria-hidden="true">⚙</span><span>系统设置</span></button>
+    </nav>
+  </aside>
+  <div class="app-main">
+    <header class="topbar">
+      <div class="topbar-left"><div class="topbar-title">选项管理</div></div>
+      <div class="topbar-user">
+        <span class="user-dept">财务资产部</span><span class="user-name">孙晋宁</span>
+        <button class="btn btn-xs">修改密码</button><button class="btn btn-xs">退出</button>
+      </div>
+    </header>
+    <main class="page-container">
+      <section id="page-dict" class="page"></section>
+    </main>
+  </div>
+</div>
 <script>/**
  * fields.js - 台账字段定义（新指标体系 v3，依据《应收系统统计指标.xlsx》28 列）
  *
@@ -1537,6 +1575,71 @@ const PERM_DEFS = [
 const TAG_COLORS = {
   '完工': 'tag-green', '施工中': 'tag-blue', '中止': 'tag-orange', '取消或作废': 'tag-gray',
   '正常': 'tag-green', '逾期': 'tag-overdue', '诉讼': 'tag-red', '和解': 'tag-teal',
+};
+</script>
+<script>/**
+ * dict.js - 选项字典模块（要求三：蓝色内置可选项，财务可自行编辑）
+ *
+ * 数据来源：ar_dict 表（财务管理员在「选项管理」页维护）；
+ * 表未建 / 无网络 / 类别为空时自动降级为内置默认选项，功能不受影响。
+ * 编辑表单中的下拉（select/combo）均从这里取值。
+ */
+
+/* 内置默认选项（与 sql/upgrade-v3-indicators.sql 种子一致，作兜底） */
+const DICT_BUILTIN = {
+  project_status:  ['完工', '施工中', '中止', '取消或作废'],
+  final_method:    ['合同金额', '工作量'],
+  debt_status:     ['正常', '逾期', '诉讼', '和解'],
+  client_attr:     ['内部单位', '政府部门--省', '政府部门--市', '政府部门--县', '政府部门--县以下',
+                   '煤矿集团--晋能控股', '煤矿集团--山西焦煤', '煤矿集团--潞安化工', '煤矿集团--华阳新材',
+                   '煤矿集团--华新燃气', '煤矿集团--其他煤矿', '社会客户-省内', '社会客户-省外',
+                   '社会客户-海外', '其他'],
+  unit:            ['物化院', '六勘院', '测绘院', '禹地公司'],
+  work_nature:     ['二、三维地震', '宅基地', '农经权', '房地一体', '其他测绘', '工民建勘察',
+                   '报告编写、设计方案', '政府性灾害勘察', '地灾评估、勘察、设计', '市场地质', '价款项目',
+                   '综合物探', '基础施工', '灾害施工', '生态修复', '化验、基础检测', '土工试验', '其他'],
+  sector:          ['能源资源勘查开发', '生态保护修复', '地质灾害治理', '工程勘察与施工',
+                   '地质延伸产业', '实验测试', '测绘地理信息', '海外勘查贸易'],
+  comm_method:     ['电话', '上门拜访', '邮件', '微信', '函件+电话', '函件+微信'],
+  feedback:        ['承认欠款，但资金紧张', '拒接电话', '对质量提出异议', '正在筹款，近期付',
+                   '工程量结算有争议', '承认欠款，要求分期'],
+  progress_note:   ['已发送第二次催款函', '停工', '需协商', '已安排对账', '对方提出分期', '移交法务部'],
+  next_plan:       ['升级催收手段', '需实地调查', '需核实情况', '跟踪付款进度', '申请财产保全', '提供分期计划'],
+  attach_category: ['决算', '中止证明', '其他'],
+};
+
+const Dicts = {
+
+  cache: {},        // category -> [value, ...]（仅存 ar_dict 中实际存在的）
+  dbOk: false,      // ar_dict 表是否可用
+
+  /** 登录后调用：加载全部字典 */
+  async load() {
+    this.cache = {};
+    this.dbOk = false;
+    try {
+      const { data, error } = await sb.from('ar_dict')
+        .select('category, value').order('category').order('sort_order').limit(2000);
+      if (!error && data) {
+        this.dbOk = true;
+        data.forEach(d => {
+          (this.cache[d.category] = this.cache[d.category] || []).push(d.value);
+        });
+      }
+    } catch (e) { /* 表未建等情况，静默降级 */ }
+  },
+
+  /** 某类别的选项列表（数据库优先，空则用内置默认） */
+  get(category) {
+    const list = this.cache[category];
+    if (list && list.length) return list;
+    return DICT_BUILTIN[category] || [];
+  },
+
+  /** 类别是否在数据库中有维护（「选项管理」页区分内置/自定义） */
+  isManaged(category) {
+    return !!(this.cache[category] && this.cache[category].length);
+  },
 };
 </script>
 <script>/**
@@ -1758,751 +1861,463 @@ const Utils = {
 };
 </script>
 <script>/**
- * dashboard.js - 数据看板 v3（新指标体系口径）
- * 数据来源：Ledger.rows（RLS 已按部门权限隔离，与台账总览口径一致）
- * 口径：账内应收 = 开票 − 到账；账外应收 = 决算 − 开票；
- *      应收余额 = 决算 − 到账 − 核销；债权状态为手工维护（正常/逾期/诉讼/和解）
- *      决算金额未定的行：账外应收 / 应收余额不计入合计（KPI 附提示笔数）
- * 视角：部门（责任口径）与 单位（债权主体法人口径）正交聚合（CONTEXT.md「组织」）
- * 趋势：月度开票/回款（数据源 ar_invoices / ar_receipts 明细表，表未建时该卡静默隐藏）
+ * dictadmin.js - 选项管理页（要求三：蓝色内置可选项，财务可自行编辑）
  *
- * 图表：纯 SVG 手绘，无外部依赖。
- *   ⚠ 关键：SVG 用 viewBox + width:100% 时，容器比 viewBox 宽多少，图内文字就放
- *   大多少倍（520 宽的 viewBox 放进 1400px 卡片 → 12px 文字渲染成 32px）。
- *   因此这里**先量容器宽度再生成 viewBox**（见 paintCharts），缩放比恒为 1，
- *   文字尺寸即设计尺寸；同时用 max-width 封顶，避免超宽屏上条形长得失去可比性。
- * 配色：颜色只承载语义，不承载装饰——「欠款量级」类图统一主色，
- *   仅「客户属性大类」与「债权状态」使用分类/语义色。
+ * 管理表单下拉选项（ar_dict）：增删改、上下排序。
+ * 保存方式：整类重写（先删后插），保证顺序即 sort_order。
+ * 类别为空时以内置默认选项作为初始内容，保存后即入库生效。
+ *
+ * 版面：双栏面板 —— 左栏类别索引（类别名 + 项数 + 是否已自定义），
+ *       右栏当前类别的选项编辑区。样式见 css/style.css「选项管理」段。
  */
 
-/* —— 图表色板（对应 css/style.css :root 令牌的 sRGB 等价色）—— */
-const C_PRIMARY   = '#21539c';   // --primary
-const C_INK_950   = '#101926';   // --ink-950
-const C_INK_600   = '#5f6771';   // --ink-600
-const C_INK_500   = '#7a818b';   // --ink-500
-const C_INK_400   = '#a0a5ad';   // --ink-400
-const C_LINE      = '#e0e3e8';   // --line
-const C_SURFACE_3 = '#ecf0f5';   // --surface-3
-const C_DANGER    = '#b51f1c';   // --danger
-const C_OK        = '#267543';   // --ok
-const C_TEAL      = '#006a6a';   // --teal
-const C_VIOLET    = '#623e96';   // --violet
+const DictAdmin = {
 
-/** 图表宽度上限：超过这个宽度条形过长、标签与数值距离过远，反而不好读 */
-const DASH_MAX_W = 1120;
+  current: null,   // 当前类别 key
+  items: [],       // 当前类别的选项值（有序）
+  dirty: false,
 
-/** 客户属性大类着色（分类用色，刻意避开红/琥珀以免与风险语义混淆） */
-function groupColorOf(name) {
-  if (/^内部单位/.test(name)) return C_INK_600;
-  if (/^政府部门/.test(name)) return C_PRIMARY;
-  if (/^煤矿集团/.test(name)) return C_TEAL;
-  if (/^社会客户/.test(name)) return C_VIOLET;
-  return C_INK_400;
-}
+  async load(catKey) {
+    const page = document.getElementById('page-dict');
+    if (!page) return;
+    if (!Auth.isAdmin) {
+      page.innerHTML = `
+        <div class="page-head"><h2>选项管理</h2></div>
+        <div class="guide-card"><p class="muted">只有财务管理员可以维护选项。</p></div>`;
+      return;
+    }
+    if (!this.current) this.current = catKey || DICT_CATEGORIES[0].key;
 
-const Dashboard = {
+    // 读取数据库实际值；类别未维护时用内置默认值作为起点
+    const { data, error } = await sb.from('ar_dict')
+      .select('value').eq('category', this.current).order('sort_order');
+    if (error) { Utils.toast('选项加载失败：' + error.message, 'error'); return; }
+    this.items = (data || []).map(d => d.value);
+    if (!this.items.length) this.items = [...Dicts.get(this.current)];
+    this.dirty = false;
+    this.render();
+  },
 
-  /* 图表数据缓存（供窗口尺寸变化后重绘，避免重新拉数据） */
-  _ch: null,
-  _resizeBound: false,
+  /* ================= 渲染 ================= */
+
+  /** 左栏：一个类别条目（项数与表单下拉同源 —— 都走 Dicts.get） */
+  catItem(c) {
+    const managed = Dicts.isManaged(c.key);
+    const active = c.key === this.current;
+    return `
+      <button type="button" class="dc-item ${active ? 'is-active' : ''}" data-cat="${c.key}"
+        ${active ? 'aria-current="true"' : ''} title="${managed ? '已自定义' : '内置默认（尚未落库）'}">
+        <span class="dc-dot ${managed ? 'is-db' : ''}" aria-hidden="true"></span>
+        <span class="dc-name">${Utils.escapeHtml(c.label)}</span>
+        <span class="dc-num">${Dicts.get(c.key).length}</span>
+      </button>`;
+  },
+
+  rows() {
+    if (!this.items.length) {
+      return `<tr><td colspan="3" class="dict-empty">
+          <b>这一类还没有选项</b>
+          <span>表单下拉会回退为内置默认值，用下方输入框添加第一条</span>
+        </td></tr>`;
+    }
+    return this.items.map((v, i) => `
+      <tr data-idx="${i}">
+        <td class="dt-idx">${i + 1}</td>
+        <td class="dt-val">
+          <input class="dict-item" data-idx="${i}" value="${Utils.escapeHtml(v)}"
+                 aria-label="第 ${i + 1} 项选项内容">
+        </td>
+        <td class="dt-act">
+          <div class="dt-acts">
+            <button type="button" class="iconbtn" data-act="up" data-idx="${i}"
+              title="上移" aria-label="上移" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button type="button" class="iconbtn" data-act="down" data-idx="${i}"
+              title="下移" aria-label="下移" ${i === this.items.length - 1 ? 'disabled' : ''}>↓</button>
+            <button type="button" class="iconbtn is-del" data-act="del" data-idx="${i}"
+              title="删除" aria-label="删除">✕</button>
+          </div>
+        </td>
+      </tr>`).join('');
+  },
 
   render() {
-    const page = document.getElementById('page-dashboard');
+    const page = document.getElementById('page-dict');
     if (!page) return;
-    const rows = Ledger.rows || [];
+    const cats = DICT_CATEGORIES;
+    const cur = cats.find(c => c.key === this.current) || cats[0];
+    const managed = Dicts.isManaged(this.current);
+    /* 保存按钮何时可用：
+       - 有未保存修改 → 可保存
+       - 该类别还只是内置默认（未落库）→ 也可保存，否则财务没有入口把它固化进数据库 */
+    const canSave = this.dirty || !managed;
 
-    if (!rows.length) {
-      this._ch = null;
-      page.innerHTML = `
-        <div class="dash-empty">
-          <p>暂无可统计的台账数据</p>
-          <p class="muted">可能原因：账号未开放台账查看权限，或本部门尚无台账记录。</p>
-        </div>`;
+    page.innerHTML = `
+      <div class="page-head">
+        <h2>选项管理</h2>
+        <span class="muted">表单下拉的取值与顺序在此维护，保存后全系统即时生效</span>
+      </div>
+      <div class="dict-panel">
+        <aside class="dict-cats">
+          <div class="dc-head"><span>类别</span><span class="dc-total">${cats.length}</span></div>
+          <div class="dc-list">${cats.map(c => this.catItem(c)).join('')}</div>
+          <div class="dc-legend">
+            <span><i class="dc-dot is-db"></i>已自定义</span>
+            <span><i class="dc-dot"></i>内置默认</span>
+          </div>
+        </aside>
+        <section class="dict-main" id="dict-main">
+          <header class="dm-head">
+            <h3>${Utils.escapeHtml(cur.label)}</h3>
+            <span class="tag ${managed ? 'tag-blue' : 'tag-gray'}">${managed ? '已自定义' : '内置默认（未落库）'}</span>
+            <span class="dm-warn ${this.dirty ? '' : 'hidden'}">有未保存的修改</span>
+            <span class="dm-count">共 ${this.items.length} 项</span>
+          </header>
+          <div class="dm-body">
+            <table class="dict-table">
+              <thead><tr>
+                <th class="dt-idx">#</th>
+                <th class="dt-val">选项内容</th>
+                <th class="dt-act">操作</th>
+              </tr></thead>
+              <tbody>${this.rows()}</tbody>
+            </table>
+          </div>
+          <footer class="dm-foot">
+            <div class="dm-add">
+              <input class="ipt" id="dict-new" placeholder="新增选项内容…" aria-label="新增选项内容">
+              <button type="button" class="btn" data-act="add">添加</button>
+            </div>
+            <button type="button" class="btn ${canSave ? 'btn-primary' : ''}" data-act="save"
+              ${canSave ? '' : 'disabled'}>${managed ? '保存修改' : '保存并启用'}</button>
+            <div id="dict-error" class="editor-error hidden"></div>
+          </footer>
+        </section>
+      </div>`;
+
+    this.bind();
+  },
+
+  /* ================= 事件 ================= */
+
+  bind() {
+    const page = document.getElementById('page-dict');
+
+    // 切换类别（有未保存修改时先确认）
+    page.querySelectorAll('.dc-item').forEach(b => b.addEventListener('click', async () => {
+      const key = b.dataset.cat;
+      if (key === this.current) return;
+      if (this.dirty) {
+        const ok = await Utils.confirm('当前类别有未保存的修改，切换后将丢失。确定切换？',
+          { title: '切换类别', confirmText: '放弃修改' });
+        if (!ok) return;
+      }
+      this.current = key;
+      await this.load(key);
+    }));
+
+    // 就地编辑：不整体重渲染（会丢焦点），只同步头部与保存按钮
+    page.querySelectorAll('.dict-item').forEach(inp => inp.addEventListener('input', () => {
+      this.items[Number(inp.dataset.idx)] = inp.value;
+      this.dirty = true;
+      this.syncHead();
+    }));
+
+    // 新增：回车即添加，省一次鼠标移动
+    const newInput = page.querySelector('#dict-new');
+    newInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); this.addItem(); }
+    });
+    page.querySelector('[data-act="add"]').addEventListener('click', () => this.addItem());
+
+    page.querySelector('[data-act="save"]').addEventListener('click', () => this.save());
+    this.bindRowActs();
+  },
+
+  bindRowActs() {
+    const page = document.getElementById('page-dict');
+
+    page.querySelectorAll('[data-act="up"]').forEach(a => a.addEventListener('click', () => {
+      const i = Number(a.dataset.idx);
+      if (i <= 0) return;
+      [this.items[i - 1], this.items[i]] = [this.items[i], this.items[i - 1]];
+      this.dirty = true;
+      this.render();
+      this.focusRow(i - 1, 'up');
+    }));
+
+    page.querySelectorAll('[data-act="down"]').forEach(a => a.addEventListener('click', () => {
+      const i = Number(a.dataset.idx);
+      if (i >= this.items.length - 1) return;
+      [this.items[i + 1], this.items[i]] = [this.items[i], this.items[i + 1]];
+      this.dirty = true;
+      this.render();
+      this.focusRow(i + 1, 'down');
+    }));
+
+    /* 删除要二次确认：文字按钮只有 11×15px 且紧贴上移/下移，误点后若再点保存
+       就真的从数据库删掉了 —— 这条路必须有个刹车。 */
+    page.querySelectorAll('[data-act="del"]').forEach(a => a.addEventListener('click', async () => {
+      const i = Number(a.dataset.idx);
+      const v = this.items[i];
+      const ok = await Utils.confirm(`确定删除选项「${v}」？\n保存后将从数据库中移除。`,
+        { title: '删除选项', danger: true, confirmText: '删除' });
+      if (!ok) return;
+      this.items.splice(i, 1);
+      this.dirty = true;
+      this.render();
+      // 焦点落到同一位置的那一行，连删多条时不用重新找
+      if (!this.items.length) document.getElementById('dict-new')?.focus();
+      else this.focusRow(Math.min(i, this.items.length - 1), 'del');
+    }));
+  },
+
+  /** 重渲染后把焦点放回原位置（否则键盘/连点操作每次都要重新定位） */
+  focusRow(i, prefer) {
+    const btn = document.querySelector(`#page-dict [data-act="${prefer}"][data-idx="${i}"]`);
+    if (btn && !btn.disabled) { btn.focus(); return; }
+    document.querySelector(`#page-dict .dict-item[data-idx="${i}"]`)?.focus();
+  },
+
+  /** 局部同步头部状态（输入时用，避免重渲染丢焦点） */
+  syncHead() {
+    const main = document.getElementById('dict-main');
+    if (!main) return;
+    const managed = Dicts.isManaged(this.current);
+    const warn = main.querySelector('.dm-warn');
+    if (warn) warn.classList.toggle('hidden', !this.dirty);
+    const cnt = main.querySelector('.dm-count');
+    if (cnt) cnt.textContent = `共 ${this.items.length} 项`;
+    const btn = main.querySelector('[data-act="save"]');
+    if (btn) {
+      const can = this.dirty || !managed;
+      btn.disabled = !can;
+      btn.classList.toggle('btn-primary', can);
+      btn.textContent = managed ? '保存修改' : '保存并启用';
+    }
+  },
+
+  addItem() {
+    const inp = document.getElementById('dict-new');
+    if (!inp) return;
+    const v = inp.value.trim();
+    if (!v) { inp.focus(); return; }
+    if (this.items.includes(v)) { Utils.toast('该选项已存在', 'error'); inp.select(); return; }
+    this.items.push(v);
+    this.dirty = true;
+    this.render();
+    const again = document.getElementById('dict-new');
+    again?.focus();
+    const body = document.querySelector('#page-dict .dm-body');
+    if (body) body.scrollTop = body.scrollHeight;   // 连加多条时新行要在视野内
+  },
+
+  /* ================= 保存 ================= */
+
+  /**
+   * 整类重写：先删后插，保证 sort_order 就是列表顺序。
+   *
+   * ⚠ PostgREST 的单次请求没有事务，delete 与 insert 是两个请求 ——
+   *   一旦 delete 成功而 insert 失败，该类选项就被清空且无法恢复。
+   *   故这里先取一份回滚快照，插入失败时按原样写回（补偿事务）。
+   *   快照必须取自「删除前的数据库内容」而不是内存里的 items：
+   *   未落库的类别删 0 行，快照若用了内置默认值，回滚反而会把它误写成"已自定义"。
+   */
+  async save() {
+    const cur = this.current;
+    const errBox = document.getElementById('dict-error');
+    const btn = document.querySelector('#page-dict [data-act="save"]');
+    const managed = Dicts.isManaged(cur);
+    const restoreBtn = () => {
+      if (!btn) return;
+      btn.disabled = !(this.dirty || !managed);
+      btn.classList.toggle('btn-primary', !btn.disabled);
+      btn.textContent = managed ? '保存修改' : '保存并启用';
+    };
+    const fail = (msg) => {
+      if (errBox) { errBox.textContent = msg; errBox.classList.remove('hidden'); }
+      Utils.toast('保存失败', 'error');
+      restoreBtn();
+    };
+
+    if (errBox) errBox.classList.add('hidden');
+
+    // 清洗：去空、去重
+    const clean = [...new Set(this.items.map(v => v.trim()).filter(Boolean))];
+    if (clean.length !== this.items.length) {
+      this.items = clean;
+      this.dirty = true;
+      this.render();
+      Utils.toast('已自动去除空项/重复项，请再次点击保存', 'info');
       return;
     }
 
-    /* ---------- 汇总（决算未定的行不参与账外/余额合计，CONTEXT.md 口径） ---------- */
-    const comp = r => Ledger.computeRow(r);
-    const sum = (fn) => rows.reduce((s, r) => s + fn(r), 0);
-    const hasFinal = r => r.final_amount !== null && r.final_amount !== undefined && r.final_amount !== '';
-    const unfinalCount = rows.filter(r => !hasFinal(r)).length;
-    const finalCount = rows.length - unfinalCount;
-    const totalFinal = sum(r => Number(r.final_amount || 0));
-    const totalInvoiced = sum(r => Number(r.invoiced_amount || 0));
-    const totalReceived = sum(r => Number(r.received_amount || 0));
-    const totalWriteoff = sum(r => Number(r.writeoff_amount || 0));
-    const totalInternal = sum(r => comp(r).receivable_internal);
-    const totalExternal = sum(r => Number(comp(r).receivable_external) || 0);
-    const totalBalance = sum(r => Number(comp(r).receivable_balance) || 0);
+    if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
 
-    /* 债权状态构成 */
-    const debtCounts = {};
-    rows.forEach(r => {
-      const k = r.debt_status || '未填写';
-      debtCounts[k] = (debtCounts[k] || 0) + 1;
-    });
+    // ① 回滚快照
+    const { data: before, error: readErr } = await sb.from('ar_dict')
+      .select('value, sort_order').eq('category', cur).order('sort_order');
+    if (readErr) { fail('保存失败：' + readErr.message); return; }
 
-    /* ---------- 欠款口径（四张金额图统一，与「催收跟踪」一致，见提交 2dad2e4）----------
-       决算已定 → 应收余额（决算 − 到账 − 核销）
-       决算未定 → 账内应收（开票 − 到账），照样子要催、也要看
-       ⚠ 为什么必须分两段聚合而不是合成一个数：
-         ① 只看应收余额 —— 决算大面积未定的台账整张图会被清空（用户即如此反馈：
-            「各部门应收余额中没有显示各部门的余额」）。v3.1 空值口径把决算未定的行
-            一律记 0 再被 filter(v > 0) 滤掉，图就只剩零星几条甚至一条不剩。
-         ② 直接相加 —— 「应收余额」与「账内应收」是两个口径，混成一个数字会让金额
-            失去含义，财务无法核对。故按段堆叠：实色段 = 应收余额，淡色段 = 决算未定部分。 */
-    const owedOf = r => {
-      const c = comp(r);
-      const b = c.receivable_balance;
-      return b === null ? Number(c.receivable_internal) || 0 : Number(b) || 0;
-    };
-    const owedParts = r => {
-      const c = comp(r);
-      const b = c.receivable_balance;
-      return b === null ? { bal: 0, unfin: Number(c.receivable_internal) || 0 }
-                        : { bal: Number(b) || 0, unfin: 0 };
-    };
-    const unfinCount = rows.filter(r => comp(r).receivable_balance === null).length;
-    const unfinWan = rows.reduce((s, r) => s + owedParts(r).unfin, 0);
-    /* 卡片头口径注（仅当确有决算未定的行时才出现，避免常态下噪音） */
-    const unfinNote = unfinCount ? ` · 决算未定 ${unfinCount} 笔按账内应收计` : '';
+    // ② 删旧
+    const { error: delErr } = await sb.from('ar_dict').delete().eq('category', cur);
+    if (delErr) { fail('保存失败：' + delErr.message); return; }
 
-    /** 按任意维度聚合 → [名称, 应收余额, 决算未定按账内应收] 三元组（降序，剔除合计 ≤ 0） */
-    const agg = keyOf => {
-      const m = {};
-      rows.forEach(r => {
-        const k = keyOf(r);
-        const o = owedParts(r);
-        if (!m[k]) m[k] = [0, 0];
-        m[k][0] += o.bal;
-        m[k][1] += o.unfin;
-      });
-      return Object.entries(m)
-        .map(([k, v]) => [k, v[0], v[1]])
-        .filter(([, a, b]) => a + b > 0)
-        .sort((x, y) => (y[1] + y[2]) - (x[1] + x[2]));
-    };
-
-    /* 部门应收余额 TOP8（责任口径） */
-    const deptBars = agg(r => Ledger.deptNameOf(r)).slice(0, 8);
-
-    /* 各单位（债权主体，法人口径）应收余额——部门与单位正交，按行上「单位」字段聚合 */
-    const unitBars = agg(r => r.creditor_unit || '未填写');
-
-    /* 客户应收余额 TOP10（按客户名称聚合） */
-    const custBars = agg(r => r.owner_unit && String(r.owner_unit).trim() || '未填写').slice(0, 10);
-
-    /* 客户属性欠款构成（按大类着色：内部单位/政府部门/煤矿集团/社会客户） */
-    const ATTR_GROUPS = [
-      ['内部单位', /^内部单位/], ['政府部门', /^政府部门/],
-      ['煤矿集团', /^煤矿集团/], ['社会客户', /^社会客户/], ['其他', /.*/],
-    ];
-    const groupOf = name => ATTR_GROUPS.find(([, re]) => re.test(name))[0];
-    const attrBars = agg(r => r.client_attr && String(r.client_attr).trim() || '未填写');
-    const attrGroupTotals = {};
-    attrBars.forEach(([k, a, b]) => {
-      const g = groupOf(k);
-      attrGroupTotals[g] = (attrGroupTotals[g] || 0) + a + b;
-    });
-
-    /* 催收跟踪 TOP10：欠款 > 0，优先逾期，再按最新催收时间最早
-       欠款口径同上 owedOf（决算已定 = 应收余额；决算未定 = 账内应收） */
-    const tracking = rows
-      .filter(r => owedOf(r) > 0)
-      .sort((a, b) => {
-        const ra = a.debt_status === '逾期' ? 0 : 1, rb = b.debt_status === '逾期' ? 0 : 1;
-        if (ra !== rb) return ra - rb;
-        return String(a.dunning_date || '9999').localeCompare(String(b.dunning_date || '9999'));
-      }).slice(0, 10);
-
-    page.innerHTML = `
-      <div class="dash-kpis">
-        <div class="kpi-card">
-          <div class="kpi-label">决算总额（应收总量）</div>
-          <div class="kpi-value">${this.wan(totalFinal)}</div>
-          <div class="kpi-sub">共 ${rows.length} 笔 · 已定案 ${finalCount} 笔 · 开票 ${this.wan(totalInvoiced)}</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">账内应收（开票 − 到账）</div>
-          <div class="kpi-value kpi-blue">${this.wan(totalInternal)}</div>
-          <div class="kpi-sub">已开票未回款 · 已到账 ${this.wan(totalReceived)}</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">账外应收（决算 − 开票）</div>
-          <div class="kpi-value">${this.wan(totalExternal)}</div>
-          <div class="kpi-sub">已决算未开票${unfinalCount ? ` · ${unfinalCount} 笔决算未定未计入` : ''}</div>
-        </div>
-        <div class="kpi-card kpi-danger">
-          <div class="kpi-label">应收余额（决算 − 到账 − 核销）</div>
-          <div class="kpi-value">${this.wan(totalBalance)}</div>
-          <div class="kpi-sub">已核销 ${this.wan(totalWriteoff)} · 逾期 ${debtCounts['逾期'] || 0} 笔 · 诉讼 ${debtCounts['诉讼'] || 0} 笔</div>
-          ${unfinCount ? `<div class="kpi-sub is-warn">另 ${unfinCount} 笔决算未定（账内应收 ${this.wan(unfinWan)}）按口径不计入本卡；下方金额图已按账内应收补入</div>` : ''}
-        </div>
-      </div>
-
-      <div class="dash-card" id="dash-trend" style="display:none">
-        <div class="dash-card-head">
-          <h3>月度开票 / 回款趋势</h3>
-          <span class="muted">近 12 个月 · 按明细发生额 · <span id="dash-trend-note"></span></span>
-        </div>
-        <div class="dash-card-body"><div data-chart="trend"></div></div>
-      </div>
-
-      <div class="dash-grid">
-        <div class="dash-card">
-          <div class="dash-card-head">
-            <h3>各单位应收余额（债权主体）</h3>
-            <span class="muted">法人口径 · 按台账「单位」列聚合${unfinNote}</span>
-          </div>
-          <div class="dash-card-body"><div data-chart="unit"></div></div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-head"><h3>债权状态构成</h3><span class="muted">人工维护的处置阶段</span></div>
-          <div class="dash-card-body"><div data-chart="debt"></div></div>
-        </div>
-      </div>
-
-      <div class="dash-grid even">
-        <div class="dash-card">
-          <div class="dash-card-head"><h3>各部门应收余额 TOP8</h3><span class="muted">责任口径 · 按部门归属${unfinNote}</span></div>
-          <div class="dash-card-body"><div data-chart="dept"></div></div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card-head"><h3>客户应收余额 TOP10</h3><span class="muted">催收对象排序 · 按客户名称聚合${unfinNote}</span></div>
-          <div class="dash-card-body"><div data-chart="cust"></div></div>
-        </div>
-      </div>
-
-      <div class="dash-card">
-        <div class="dash-card-head">
-          <h3>客户属性欠款构成</h3>
-          <span class="muted">按 15 类客户属性聚合 · 四大类着色（政府部门 / 煤矿集团 / 社会客户 / 内部单位）${unfinNote}</span>
-        </div>
-        <div class="dash-card-body"><div data-chart="attr"></div></div>
-      </div>
-
-      <div class="dash-card">
-        <div class="dash-card-head">
-          <h3>催收跟踪 TOP10</h3>
-          <span class="muted">逾期优先 · 再按最新催收时间从早到晚 · 决算未定按账内应收计</span>
-        </div>
-        <div class="table-wrap">
-          <table class="ledger-table dash-table">
-            <thead><tr>
-              <th style="min-width:100px;max-width:100px">合同编号</th>
-              <th style="min-width:200px;max-width:200px">项目名称</th>
-              <th style="min-width:90px;max-width:90px">部门</th>
-              <th style="min-width:100px;max-width:100px" class="ta-r">应收余额</th>
-              <th style="min-width:84px;max-width:84px" class="ta-r">债权状态</th>
-              <th style="min-width:104px;max-width:104px" class="ta-r">最新催收时间</th>
-              <th style="min-width:90px;max-width:90px">清收责任人</th>
-            </tr></thead>
-            <tbody>
-              ${tracking.length
-                ? tracking.map(r => `
-                  <tr>
-                    <td title="${Utils.escapeHtml(r.contract_no || '')}">${Utils.escapeHtml(r.contract_no || '—')}</td>
-                    <td class="td-name" title="${Utils.escapeHtml(r.project_name || '')}">${Utils.escapeHtml(Utils.clampName(r.project_name || '（未填项目）'))}</td>
-                    <td>${Utils.escapeHtml(Ledger.deptNameOf(r))}</td>
-                    <td class="ta-r td-money owed" ${comp(r).receivable_balance === null ? 'title="决算未定，此处为账内应收（开票−到账）"' : ''}>${Utils.fmtMoney(owedOf(r))}${comp(r).receivable_balance === null ? '<span class="muted">*</span>' : ''}</td>
-                    <td class="ta-r">${r.debt_status ? `<span class="tag ${TAG_COLORS[r.debt_status] || 'tag-gray'}">${Utils.escapeHtml(r.debt_status)}</span>` : '—'}</td>
-                    <td class="ta-r">${Utils.escapeHtml(r.dunning_date || '—')}</td>
-                    <td>${Utils.escapeHtml(r.collector || '—')}</td>
-                  </tr>`).join('')
-                : '<tr><td colspan="7" class="empty-cell">暂无未清收合同 ✓</td></tr>'}
-            </tbody>
-          </table>
-        </div>
-      </div>`;
-
-    /* 图表数据入缓存 → 量宽绘制（render 时页面已可见，clientWidth 有效） */
-    this._ch = {
-      unit: unitBars, dept: deptBars, cust: custBars,
-      attr: attrBars, attrTotals: attrGroupTotals,
-      debt: { counts: debtCounts, total: rows.length },
-      trend: null,
-    };
-    this.bindResize();
-    this.paintCharts();
-    this.loadTrend();
-  },
-
-  /* ---------- 按容器实测宽度绘制全部图表（缩放比恒为 1） ---------- */
-  paintCharts() {
-    const page = document.getElementById('page-dashboard');
-    const ch = this._ch;
-    if (!page || !ch) return;
-
-    const paint = (name, build) => {
-      const el = page.querySelector(`[data-chart="${name}"]`);
-      if (!el) return;
-      const w = Math.round(el.clientWidth);
-      if (!w || w < 80) return;   // 容器不可见（如趋势卡尚未展开）→ 稍后重绘
-      el.innerHTML = build(Math.min(w, DASH_MAX_W));
-    };
-
-    paint('unit', w => this.unitChart(ch.unit, w));
-    paint('debt', w => this.debtChart(ch.debt.counts, ch.debt.total, w));
-    paint('dept', w => this.deptChart(ch.dept, w));
-    paint('cust', w => this.custChart(ch.cust, w));
-    paint('attr', w => this.attrChart(ch.attr, w) + this.attrLegend(ch.attrTotals));
-    if (ch.trend) paint('trend', w => this.trendChart(ch.trend.months, ch.trend.invMap, ch.trend.recvMap, w));
-  },
-
-  /* 窗口尺寸变化 → 防抖重绘（不重新请求数据） */
-  bindResize() {
-    if (this._resizeBound) return;
-    this._resizeBound = true;
-    let timer = null;
-    window.addEventListener('resize', () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (typeof App !== 'undefined' && App.currentView === 'dashboard') this.paintCharts();
-      }, 160);
-    });
-  },
-
-  /* ---------- 月度开票/回款趋势（ar_invoices / ar_receipts 明细聚合） ---------- */
-  async loadTrend() {
-    const card = document.getElementById('dash-trend');
-    if (!card) return;
-
-    /* 近 12 个月起始日（含当月） */
-    const since = new Date();
-    since.setMonth(since.getMonth() - 11, 1);
-    const sinceStr = since.toISOString().slice(0, 10);
-
-    let inv, recv;
-    try {
-      [inv, recv] = await Promise.all([
-        sb.from('ar_invoices').select('invoice_date,amount').gte('invoice_date', sinceStr),
-        sb.from('ar_receipts').select('receipt_date,amount').gte('receipt_date', sinceStr),
-      ]);
-    } catch (e) { card.remove(); return; }
-    /* 明细表未建（upgrade-v3.1-receipts.sql 未执行）或查询失败 → 静默隐藏整卡 */
-    if ((inv && inv.error) || (recv && recv.error)) { card.remove(); return; }
-
-    /* 页面可能已切走，缓存已重置 */
-    if (!this._ch) return;
-
-    const months = [];
-    const now = new Date();
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    // ③ 插新
+    if (clean.length) {
+      const { error: insErr } = await sb.from('ar_dict')
+        .insert(clean.map((v, i) => ({ category: cur, value: v, sort_order: i + 1 })));
+      if (insErr) {
+        let note = '（已自动回滚，数据未丢失）';
+        if ((before || []).length) {
+          const { error: rbErr } = await sb.from('ar_dict').insert(
+            before.map(r => ({ category: cur, value: r.value, sort_order: r.sort_order })));
+          if (rbErr) note = `（自动回滚失败：${rbErr.message}，请联系管理员）`;
+        }
+        fail('保存失败：' + insErr.message + note);
+        return;
+      }
     }
-    const bucket = (arr, dateKey) => {
-      const m = {};
-      (arr || []).forEach(x => {
-        const k = String(x[dateKey] || '').slice(0, 7);
-        if (k) m[k] = (m[k] || 0) + Number(x.amount || 0);
-      });
-      return m;
-    };
-    const invMap = bucket(inv.data, 'invoice_date');
-    const recvMap = bucket(recv.data, 'receipt_date');
 
-    /* 本自然月摘要 */
-    const curMonth = months[months.length - 1];
-    const note = document.getElementById('dash-trend-note');
-    if (note) note.textContent = `本月已开票 ${this.wan(invMap[curMonth] || 0)} · 已回款 ${this.wan(recvMap[curMonth] || 0)}`;
-
-    this._ch.trend = { months, invMap, recvMap };
-    card.style.display = '';
-    this.paintCharts();
-  },
-
-  /* 月度双序列分组柱状图：开票（蓝）/ 回款（绿） */
-  trendChart(months, invMap, recvMap, W = 560) {
-    const vals = months.map(m => [Number(invMap[m] || 0), Number(recvMap[m] || 0)]);
-    if (!vals.some(v => v[0] > 0 || v[1] > 0)) {
-      return '<div class="dash-empty-sm">近 12 个月无开票 / 回款明细记录<br><span class="muted">在编辑弹窗的「开票明细 / 回款明细」区块登记后，此处自动汇总</span></div>';
-    }
-    const max = Math.max(...vals.flat());
-    const H = 196, top = 28, bottom = 42;
-    const plotH = H - top - bottom;
-    const groupW = W / months.length;
-    /* 柱宽随容器伸缩，但设上限，避免超宽屏上柱子变成细线、柱间出现大空洞 */
-    const barW = Math.max(5, Math.min(20, groupW * 0.30));
-    const y = v => top + plotH * (1 - v / max);
-
-    const bars = months.map((m, i) => {
-      const cx = i * groupW + groupW / 2;
-      const [iv, rv] = vals[i];
-      const x1 = cx - barW - 1, x2 = cx + 1;
-      const label = Number(m.slice(5)) + '月';
-      const lab = i === 0 || Number(m.slice(5)) === 1 ? String(m.slice(2, 4)) + '年' : label;
-      const t1 = iv > 0 ? `<text x="${x1 + barW / 2}" y="${y(iv) - 5}" text-anchor="middle" font-size="9" fill="${C_PRIMARY}">${this.wanShort(iv)}</text>` : '';
-      const t2 = rv > 0 ? `<text x="${x2 + barW / 2}" y="${y(rv) - 5}" text-anchor="middle" font-size="9" fill="${C_OK}">${this.wanShort(rv)}</text>` : '';
-      /* 悬停显示精确金额（柱顶标注为短格式，避免相邻柱标签重叠） */
-      const tip = `${m.slice(0, 4)}年${Number(m.slice(5))}月 · 开票 ${Utils.fmtMoney(iv)} · 回款 ${Utils.fmtMoney(rv)}`;
-      return `<g><title>${Utils.escapeHtml(tip)}</title>
-        ${t1}<rect x="${x1}" y="${y(iv)}" width="${barW}" height="${Math.max(top + plotH - y(iv), iv > 0 ? 2 : 0)}" rx="2" fill="${C_PRIMARY}"/>
-        ${t2}<rect x="${x2}" y="${y(rv)}" width="${barW}" height="${Math.max(top + plotH - y(rv), rv > 0 ? 2 : 0)}" rx="2" fill="${C_OK}"/>
-        <text x="${cx}" y="${H - 18}" text-anchor="middle" font-size="11" fill="${C_INK_500}">${lab}</text></g>`;
-    }).join('');
-    const axis = `<line x1="0" y1="${top + plotH}" x2="${W}" y2="${top + plotH}" stroke="${C_LINE}"/>`;
-    return `
-      <svg viewBox="0 0 ${W} ${H}" role="img"
-           aria-label="近 12 个月开票与回款趋势柱状图" style="width:100%;max-width:${W}px;height:auto">${axis}${bars}</svg>
-      <div class="dash-legend">
-        <div class="dash-legend-item"><i style="background:${C_PRIMARY}"></i>开票</div>
-        <div class="dash-legend-item"><i style="background:${C_OK}"></i>回款</div>
-        <div class="dash-legend-item muted">柱顶为万元短标注 · 悬停看精确金额</div>
-      </div>`;
-  },
-
-  /** 金额短格式（趋势图柱顶标注用，无货币符） */
-  wanShort(n) {
-    const v = Number(n) || 0;
-    const abs = Math.abs(v);
-    if (abs >= 100000000) return (v / 100000000).toFixed(1).replace(/\.0$/, '') + '亿';
-    if (abs >= 10000) return (v / 10000).toFixed(abs >= 1000000 ? 0 : 1).replace(/\.0$/, '') + '万';
-    return String(Math.round(v));
-  },
-
-  /** 文本像素宽度估算 —— SVG 里我们是**拼字符串**，没有布局引擎可查。
-   *  汉字/全角 ≈ 1em，数字/字母/半角标点 ≈ 0.55em。
-   *  绝不能拿「字数」当宽度：中英混排时必然失准（见 fitLabel 的注释）。 */
-  textW(str, fontSize) {
-    let w = 0;
-    for (const ch of String(str)) w += ch.charCodeAt(0) > 0x2e80 ? fontSize : fontSize * 0.55;
-    return w;
-  },
-
-  /** 把标签截到不超过 maxPx（末尾补省略号），**从头部截**。
-   *  历史 bug（用户报告「名称很长的显示不全，只能看到中间几个字」）：
-   *    原先按「字数」截断（客户图 labelMax = 12 字 → 144px），而该图标签区
-   *    可用宽度只有 122px，又用 text-anchor="end" 右对齐定位 → 文字向左溢出
-   *    被 SVG 裁掉开头，屏幕上只剩中间一段（实测「山西普能控股集团某煤业有…」
-   *    左溢 34px）。宽度必须按像素算，且截断必须发生在尾部。 */
-  fitLabel(str, maxPx, fontSize) {
-    const s = String(str);
-    if (this.textW(s, fontSize) <= maxPx) return s;
-    const ellW = fontSize;                       // 「…」按 1em 计（保守）
-    let out = '';
-    let w = 0;
-    for (const ch of s) {
-      const cw = ch.charCodeAt(0) > 0x2e80 ? fontSize : fontSize * 0.55;
-      if (w + cw + ellW > maxPx) break;
-      out += ch; w += cw;
-    }
-    return (out || s.charAt(0)) + '…';
-  },
-
-  /* ---------- 部门条形图（责任口径） ---------- */
-  deptChart(bars, W) {
-    return this.barChart(bars, {
-      color: C_PRIMARY, labelW: 96, title: '各部门应收余额',
-      empty: this.EMPTY_OWED,
-    }, W);
-  },
-
-  /* ---------- 单位（债权主体）条形图 ---------- */
-  unitChart(bars, W) {
-    return this.barChart(bars, {
-      color: C_PRIMARY, labelW: 84, title: '各单位应收余额',
-      empty: this.EMPTY_OWED,
-    }, W);
-  },
-
-  /* ---------- 客户条形图（客户名普遍长，标签列上限放宽） ---------- */
-  custChart(bars, W) {
-    return this.barChart(bars, {
-      color: C_PRIMARY, labelW: 132, maxLabelW: 200, title: '客户应收余额',
-      empty: this.EMPTY_OWED,
-    }, W);
-  },
-
-  /* ---------- 客户属性条形图（按大类着色） ---------- */
-  attrChart(bars, W) {
-    return this.barChart(bars, {
-      labelW: 120, colorBy: name => groupColorOf(name), title: '客户属性欠款构成',
-      empty: this.EMPTY_OWED,
-    }, W);
-  },
-
-  /* 金额图共用的空状态文案：说明「为什么空」，而不是笼统的「暂无数据」 */
-  EMPTY_OWED: '暂无未清应收余额<br><span class="muted">应收余额与账内应收（开票−到账）均为 0 —— 或已结清、或尚未开票</span>',
-
-  /* 客户属性大类图例（含各类合计） */
-  attrLegend(groupTotals) {
-    const entries = Object.entries(groupTotals).sort((a, b) => b[1] - a[1]);
-    if (!entries.length) return '';
-    return `<div class="dash-legend">${entries.map(([g, v]) => `
-      <div class="dash-legend-item"><i style="background:${groupColorOf(g)}"></i>${g}
-        <b>${this.wan(v)}</b><span>欠款</span>
-      </div>`).join('')}</div>`;
-  },
-
-  /* ---------- 通用水平条形图（W = 容器实测宽度） ----------
-     每项 = [名称, 应收余额, 决算未定按账内应收]（第三项可省略）。
-     两段**堆叠**而非相加：实色段 = 应收余额（决算已定）；淡色描边段 = 决算未定部分。
-     一个数字里混两个口径会让金额失去含义（财务无法核对），故必须视觉可分。
-     opts.empty 可覆盖空状态文案 —— 「真的没欠款」与「口径把它滤空了」要说清楚。 */
-  barChart(bars, opts = {}, W = 520) {
-    const seg = b => [Math.max(0, Number(b[1]) || 0), Math.max(0, Number(b[2]) || 0)];
-    const totalOf = b => { const [a, c] = seg(b); return a + c; };
-    const list = (bars || []).filter(b => totalOf(b) > 0);
-    if (!list.length) return `<div class="dash-empty-sm">${opts.empty || '暂无未清应收余额'}</div>`;
-    const color = opts.color || C_PRIMARY;
-    const FS = 12;                       // 标签字号（须与下面 <text font-size> 一致）
-    const base = opts.labelW || 96;
-    /* 标签列宽自适应：按本图**最长名称**的估算宽度定，下限 base、上限
-       min(opts.maxLabelW, 容器 38%)。写死一个值会让长名被截得过狠、短名白占空间。
-       左侧用掉的宽度直接决定柱子可用宽 innerW，故上限必须有，否则柱子被挤没。
-       +20 而非 +12：右边距已吃掉 12（见 fitLabel 调用），余量必须**大于**右边距，
-       否则估算误差会让最长的那个名称差 0.2px 就被误截（实测过）。 */
-    const cap = Math.max(base, Math.min(opts.maxLabelW || 180, Math.round(W * 0.38)));
-    const nameNeed = Math.max(...list.map(b => this.textW(b[0], FS))) + 20;
-    const labelW = Math.round(Math.min(Math.max(nameNeed, base), cap));
-    const max = Math.max(...list.map(totalOf)) || 1;
-    const rowH = 34, barH = 16, valueW = 80;
-    const H = list.length * rowH + 8;
-    const innerW = Math.max(80, W - labelW - valueW);
-    let hasUnfin = false;
-    const svg = list.map((b, i) => {
-      const name = b[0];
-      const [bal, unfin] = seg(b);
-      const total = bal + unfin;
-      const y = 8 + i * rowH;
-      const wAll = Math.max(3, innerW * total / max);
-      const wBal = total > 0 ? wAll * bal / total : 0;
-      const barColor = opts.colorBy ? opts.colorBy(name) : color;
-      const label = this.fitLabel(name, labelW - 12, FS);
-      /* 淡色段 = 决算未定（账内应收）：同色相浅底 + 描边，不引入新色相（颜色只承载语义） */
-      const segUnfin = unfin > 0
-        ? `<rect x="${labelW + wBal}" y="${y}" width="${Math.max(wAll - wBal, 1.5)}" height="${barH}" rx="2"
-             fill="${barColor}" fill-opacity="0.22" stroke="${barColor}" stroke-width="1"/>` : '';
-      if (unfin > 0) hasUnfin = true;
-      const tip = unfin > 0
-        ? `${name} 合计 ${this.wan(total)}（应收余额 ${this.wan(bal)} + 决算未定按账内应收 ${this.wan(unfin)}）`
-        : `${name} ${this.wan(bal)}`;
-      /* 标签**左对齐**（默认 text-anchor:start，x=0）：名称列左缘齐平，比右对齐
-         贴着柱子参差不齐更整齐；截断只发生在尾部，读到的始终是名称开头。 */
-      return `<g><title>${Utils.escapeHtml(tip)}</title>
-        <text x="0" y="${y + barH / 2 + 4}" font-size="${FS}" fill="${C_INK_600}">${Utils.escapeHtml(label)}</text>
-        ${bal > 0 ? `<rect x="${labelW}" y="${y}" width="${Math.max(wBal, 1.5)}" height="${barH}" rx="2" fill="${barColor}"/>` : ''}
-        ${segUnfin}
-        <text x="${labelW + wAll + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="${C_INK_950}" font-weight="600">${this.wan(total)}</text></g>`;
-    }).join('');
-    const aria = `${opts.title || '条形图'}：`
-      + list.map(b => `${b[0]} ${this.wan(totalOf(b))}`).join('，');
-    /* 只有确有两段时才有必要解释颜色 —— 常态下不添噪音 */
-    const legend = hasUnfin ? `
-      <div class="dash-legend">
-        <div class="dash-legend-item"><i style="background:${color}"></i>应收余额（决算已定）</div>
-        <div class="dash-legend-item"><i class="hollow" style="border-color:${color}"></i>决算未定部分（按账内应收计）</div>
-      </div>` : '';
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${Utils.escapeHtml(aria)}"
-                 style="width:100%;max-width:${W}px;height:auto">${svg}</svg>${legend}`;
-  },
-
-  /* ---------- 债权状态构成（水平堆叠条 + 图例） ---------- */
-  debtChart(counts, total, W = 520) {
-    const defs = [
-      ['正常', C_OK], ['逾期', C_DANGER], ['诉讼', C_VIOLET],
-      ['和解', C_TEAL], ['未填写', C_INK_400],
-    ].filter(([k]) => counts[k] > 0);
-    if (!defs.length) return '<div class="dash-empty-sm">暂无数据</div>';
-    const H = 96, barY = 18, barH = 28;
-    let x = 0;
-    const segs = defs.map(([key, color]) => {
-      const w = W * counts[key] / total;
-      const seg = `<rect x="${x}" y="${barY}" width="${Math.max(w - 1, 1)}" height="${barH}" fill="${color}"><title>${key} ${counts[key]} 笔</title></rect>`;
-      x += w;
-      return seg;
-    }).join('');
-    const legend = defs.map(([key, color]) => `
-      <div class="dash-legend-item">
-        <i style="background:${color}"></i>${key}
-        <b>${counts[key]}</b><span>笔 · ${Math.round(counts[key] / total * 100)}%</span>
-      </div>`).join('');
-    const aria = `债权状态构成：` + defs.map(([k]) => `${k} ${counts[k]} 笔`).join('，');
-    return `
-      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${Utils.escapeHtml(aria)}"
-           style="width:100%;max-width:${W}px;height:auto">
-        <rect x="0" y="${barY}" width="${W}" height="${barH}" rx="4" fill="${C_SURFACE_3}"/>
-        ${segs}
-        <text x="${W / 2}" y="${barY + barH + 22}" text-anchor="middle" font-size="12" fill="${C_INK_500}">共 ${total} 笔</text>
-      </svg>
-      <div class="dash-legend">${legend}</div>`;
-  },
-
-  /** 金额 → 万元可读格式 */
-  wan(n) {
-    const v = Number(n) || 0;
-    const abs = Math.abs(v);
-    if (abs >= 100000000) return '¥' + (v / 100000000).toFixed(abs >= 1000000000 ? 0 : 1) + '亿';
-    if (abs >= 10000) return '¥' + (v / 10000).toFixed(abs >= 1000000 ? 0 : 1) + '万';
-    return '¥' + v.toLocaleString('zh-CN');
+    this.dirty = false;
+    await Dicts.load();     // 刷新全局字典缓存
+    Utils.toast('选项已保存，全系统即时生效', 'success');
+    this.render();
   },
 };
 </script>
-<script>/**
- * mock-data.js - 看板预览用的模拟数据与最小桩件（不连数据库、不发请求）
- *
- * 供 docs/preview/build-dashboard-preview.js 内联进自包含预览页，
- * 目的是让「数据看板」在没有真实账号 / 数据的情况下也能完整渲染出来做视觉验收。
- * 数据为确定性伪随机（同一种子每次一致），仅用于看版面与字号。
- */
+<script>
+/* ---------- 模拟数据 & 假 Supabase（仅预览用） ---------- */
+/* DB_DICT 里的类别 = 已在 ar_dict 入库；不在的 = 内置默认（未入库）。
+   刻意让 project_status（默认打开的第一个类别）不在库里 —— 那是最需要看清的
+   一种状态：灰色标签「内置默认（未落库）」+ 主色「保存并启用」按钮。 */
+const DB_DICT = {
+  debt_status: ['正常', '逾期', '诉讼', '和解'],
+  client_attr: ['内部单位', '政府部门--省', '政府部门--市', '政府部门--县',
+    '政府部门--县以下', '煤矿集团--晋能控股', '煤矿集团--山西焦煤', '煤矿集团--潞安化工',
+    '煤矿集团--华阳新材', '煤矿集团--华新燃气', '煤矿集团--其他煤矿', '社会客户-省内',
+    '社会客户-省外', '社会客户-海外', '其他'],
+  unit: ['物化院', '六勘院', '测绘院', '禹地公司'],
+  comm_method: ['电话', '上门拜访', '邮件', '微信', '函件+电话', '函件+微信'],
+};
 
-/* —— 与真实字典同源的取值 —— */
-const PREVIEW_DEPTS = ['地调所', '地勘分院', '岩土所', '地灾所', '实验室', '禹地公司', '资环所', '测绘院太原分院', '大地测绘中心', '工程测绘中心', '遥感中心', '大数据中心', '测绘咨询中心', '晋城分院', '能源所', '地震物探', '工程物探所', '综合研究所', '广州分院', '电磁所', '碳中和', '矿产咨询', '六勘院太原分院', '一测', '二测', '综勘三', '原物探/太原', '翟悟飞', '孙勇军', '其他'];
-const PREVIEW_UNITS = ['物化院', '六勘院', '测绘院', '禹地公司'];
-const PREVIEW_ATTRS = ['内部单位', '政府部门--省', '政府部门--市', '政府部门--县', '政府部门--县以下', '煤矿集团--晋能控股', '煤矿集团--山西焦煤', '煤矿集团--潞安化工', '煤矿集团--华阳新材', '煤矿集团--华新燃气', '煤矿集团--其他煤矿', '社会客户-省内', '社会客户-省外', '社会客户-海外', '其他'];
-const PREVIEW_NATURES = ['二、三维地震', '宅基地', '农经权', '房地一体', '其他测绘', '工民建勘察', '报告编写、设计方案', '政府性灾害勘察', '地灾评估、勘察、设计', '市场地质', '价款项目', '综合物探', '基础施工', '灾害施工', '生态修复', '化验、基础检测', '土工试验', '其他'];
-const PREVIEW_SECTORS = ['能源资源勘查开发', '生态保护修复', '地质灾害治理', '工程勘察与施工', '地质延伸产业', '实验测试', '测绘地理信息', '海外勘查贸易'];
-const PREVIEW_CLIENTS = [
-  '山西晋能控股集团某煤业有限公司', '山西焦煤集团某煤矿', '潞安化工集团某煤业', '华阳新材料科技集团',
-  '某县自然资源局', '某市规划和自然资源局', '某省地质勘查院', '某县农业农村局', '某煤业有限责任公司',
-  '山西华新燃气集团', '某市住房和城乡建设局', '某县水利局', '中煤某能源有限公司', '某县交通运输局',
-  '某测绘地理信息有限公司', '某乡人民政府', '某海外矿业有限公司', '某县应急管理局',
-];
-
-/* 确定性伪随机（LCG） */
-let _seed = 20260915;
-const rnd = () => { _seed = (_seed * 1103515245 + 12345) % 2147483648; return _seed / 2147483648; };
-const pick = arr => arr[Math.floor(rnd() * arr.length)];
-const money = (min, max) => Math.round((min + rnd() * (max - min)) / 1000) * 1000;
-const pad2 = n => String(n).padStart(2, '0');
-
-const PREVIEW_DEPT_ROWS = PREVIEW_DEPTS.map((name, i) => ({ id: 'D' + String(i + 1).padStart(3, '0'), name }));
-
-/* —— 台账模拟行 ——
-   决算未定比例由 URL hash 控制：
-     默认      12%  常见状态（覆盖「—」口径与 KPI 附注）
-     #unfinal  92%  极端状态 —— 用于复现「决算大面积未定 → 应收余额口径全空」时看板的表现。
-                     真实业务里这是常态（CONTEXT.md：一般项目不专门做决算，直接以合同额替代；
-                     工作量结算项目允许留空），故必须有稳定的复现姿势。 */
-const UNFINAL = location.hash === '#unfinal';
-const LEDGER_ROWS = (() => {
-  const rows = [];
-  const statuses = ['完工', '施工中', '中止', '取消或作废'];
-  const debts = ['正常', '正常', '正常', '逾期', '逾期', '诉讼', '和解', ''];
-  for (let i = 0; i < 72; i++) {
-    const dept = PREVIEW_DEPT_ROWS[Math.floor(rnd() * PREVIEW_DEPT_ROWS.length)];
-    const hasFinal = rnd() > (UNFINAL ? 0.92 : 0.12);
-    const contract = money(300000, 9800000);
-    const invoiced = Math.round((hasFinal ? contract : money(100000, 3000000)) * (0.25 + rnd() * 0.7));
-    const received = Math.round(invoiced * rnd() * 0.95);
-    rows.push({
-      id: 'L' + String(i + 1).padStart(4, '0'),
-      contract_no: `WT2026-${String(100 + i)}`,
-      project_name: `某${pick(['县', '市', '矿区', '乡'])}${pick(PREVIEW_NATURES)}${pick(['技术服务', '勘察', '测绘', '施工'])}项目（含野外作业与内业报告）`,
-      department_id: dept.id,
-      creditor_unit: pick(PREVIEW_UNITS),
-      owner_unit: pick(PREVIEW_CLIENTS),
-      client_attr: pick(PREVIEW_ATTRS),
-      work_nature: pick(PREVIEW_NATURES),
-      sector: pick(PREVIEW_SECTORS),
-      project_status: pick(statuses),
-      final_amount: hasFinal ? contract : null,
-      invoiced_amount: invoiced,
-      received_amount: received,
-      writeoff_amount: rnd() > 0.9 ? Math.round(received * 0.1) : 0,
-      debt_status: pick(debts),
-      dunning_date: rnd() > 0.3
-        ? `2026-${pad2(1 + Math.floor(rnd() * 9))}-${pad2(1 + Math.floor(rnd() * 28))}` : null,
-      collector: pick(['张三', '李四', '王五', '赵六', '孙勇军', '翟悟飞', '']),
-    });
-  }
-  return rows;
-})();
-
-/* —— 明细模拟（近 12 个月开票 / 回款，供趋势卡） —— */
-function mockDetail(kind) {
-  const out = [];
-  const now = new Date();
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
-    const cnt = 2 + ((i * 7) % 5);
-    for (let j = 0; j < cnt; j++) {
-      const amt = 200000 + ((i * 13 + j * 29) % 40) * 160000;
-      const day = pad2(Math.min(3 + j * 4, 28));
-      out.push(kind === 'invoice'
-        ? { invoice_date: `${key}-${day}`, amount: amt }
-        : { receipt_date: `${key}-${day}`, amount: Math.round(amt * 0.68) });
+/* 最小可用的 PostgREST 链式替身：支持 select/eq/order/limit 与 delete/insert */
+function makeChain(table) {
+  let cat = null, op = 'select', payload = null;
+  const o = {
+    select: () => o, order: () => o, limit: () => o,
+    delete: () => { op = 'delete'; return o; },
+    insert: rows => { op = 'insert'; payload = rows; return o; },
+    eq: (k, v) => { if (k === 'category') cat = v; return o; },
+    then: (res, rej) => {
+      if (op === 'select') {
+        if (cat === null) {   /* Dicts.load()：不带 eq，取全部类别 */
+          const all = [];
+          Object.keys(DB_DICT).forEach(c => DB_DICT[c].forEach((v, i) => all.push({ category: c, value: v, sort_order: i + 1 })));
+          return Promise.resolve({ data: all, error: null }).then(res, rej);
+        }
+        const vals = DB_DICT[cat] || [];
+        return Promise.resolve({ data: vals.map((v, i) => ({ value: v, sort_order: i + 1 })), error: null }).then(res, rej);
+      }
+      if (op === 'delete') { delete DB_DICT[cat]; return Promise.resolve({ error: null }).then(res, rej); }
+      DB_DICT[cat] = (payload || []).map(r => r.value);
+      return Promise.resolve({ error: null }).then(res, rej);
     }
-  }
-  return out;
+  };
+  return o;
 }
+const sb = { from: t => makeChain(t) };
 
-/* —— 最小桩件：Ledger / sb / App —— */
-const Ledger = {
-  rows: LEDGER_ROWS,
-  departments: PREVIEW_DEPT_ROWS,
-  /** 与 js/ledger.js computeRow 口径一致（决算未定 → null） */
-  computeRow(r) {
-    const inv = Number(r.invoiced_amount || 0);
-    const recv = Number(r.received_amount || 0);
-    const wo = Number(r.writeoff_amount || 0);
-    const has = r.final_amount !== null && r.final_amount !== undefined && r.final_amount !== '';
-    const fin = has ? Number(r.final_amount) : null;
-    return {
-      receivable_internal: Math.round((inv - recv) * 10000) / 10000,
-      receivable_external: fin === null ? null : Math.round((fin - inv) * 10000) / 10000,
-      receivable_balance: fin === null ? null : Math.round((fin - recv - wo) * 10000) / 10000,
-      attach_summary: '',
-    };
-  },
-  deptNameOf(r) {
-    const d = this.departments.find(x => x.id === r.department_id);
-    return d ? d.name : '未指定';
-  },
-};
+const Auth = { isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1', name: '孙晋宁' } };
 
-/** Supabase 客户端桩：loadTrend 的三段链式调用原样可用 */
-const sb = {
-  from(table) {
-    return {
-      select: () => ({
-        gte: () => Promise.resolve({
-          data: table === 'ar_invoices' ? mockDetail('invoice')
-            : table === 'ar_receipts' ? mockDetail('receipt') : [],
-          error: null,
-        }),
-      }),
-    };
-  },
-};
+(async () => {
+  await Dicts.load();
+  const h = location.hash;
+  /* #dirty 特意选一个「已入库」的类别 —— 那是真实里最常改的场景，
+     要验的是「已自定义 + 有未保存修改 → 按钮变『保存修改』」这条路径 */
+  const catFor = { '#managed': 'client_attr', '#many': 'work_nature', '#dirty': 'debt_status' };
+  await DictAdmin.load(catFor[h] || 'project_status');
 
-const App = { currentView: 'dashboard' };
+  if (h === '#dirty') {
+    const inp = document.querySelector('.dict-item');
+    inp.value = inp.value + '·改';
+    inp.dispatchEvent(new Event('input'));
+  }
 
-/* —— 渲染 —— */
-document.getElementById('root').innerHTML = `
-  <div class="app-shell">
-    <aside class="sidebar">
-      <div class="side-brand">企业应收账款<br>台账系统</div>
-      <nav class="side-nav">
-        ${[['◔', '数据看板', true], ['▤', '台账总览'], ['⇪', 'Excel 导入'], ['◱', '导入批次'],
-           ['☰', '用户管理'], ['⚙', '选项管理'], ['⚙', '系统设置']]
-          .map(([ic, label, on]) => `<button class="nav-item ${on ? 'active' : ''}">
-            <span class="nav-icon" aria-hidden="true">${ic}</span><span>${label}</span></button>`).join('')}
-      </nav>
-      <div class="side-perms">
-        <div class="sp-title">我的权限（7 · 全部）</div>
-        <ul class="perm-list">
-          ${['查看台账', '查看全部数据', '新增记录', '编辑记录', '删除记录', '导入 Excel', '导出 Excel']
-            .map(l => `<li class="on"><span class="pm-icon">✓</span>${l}</li>`).join('')}
-          <li class="on"><span class="pm-icon">✓</span>超级管理员（用户与设置）</li>
-        </ul>
-      </div>
-    </aside>
-    <div class="app-main">
-      <header class="topbar">
-        <div class="topbar-left"><div class="topbar-title">数据看板</div></div>
-        <div class="topbar-user">
-          <span class="user-dept">系统管理员</span><span class="user-name">sjn</span>
-          <button class="btn btn-xs">修改密码</button><button class="btn btn-xs">退出</button>
-        </div>
-      </header>
-      <main class="page-container"><section id="page-dashboard" class="page"></section></main>
-    </div>
-  </div>`;
+  if (h === '#confirm') {
+    document.querySelector('.dict-table tbody [data-act="del"]').click();
+  }
 
-Dashboard.render();
+  if (h === '#measure') {
+    const box = e => { const r = e.getBoundingClientRect(); return 'L' + Math.round(r.left) + ' x' + Math.round(r.top) + ' w' + Math.round(r.width) + ' h' + Math.round(r.height); };
+    const out = [];
+    const q = s => document.querySelector(s);
+    const qa = s => [...document.querySelectorAll(s)];
+
+    out.push('面板: ' + box(q('.dict-panel')) + '  左栏: ' + box(q('.dict-cats')) + '  右栏: ' + box(q('.dict-main')));
+    out.push('视口高=' + window.innerHeight + '  面板底缘 y=' + Math.round(q('.dict-panel').getBoundingClientRect().bottom)
+      + '（应≈视口高−容器底部内边距，即不再留半屏空白）');
+    out.push('body 高=' + Math.round(document.body.getBoundingClientRect().height) + '（应≈外壳高度，不该出现第二条滚动条）');
+
+    const rows = qa('.dict-table tbody tr');
+    out.push('行数=' + rows.length + '  行高集合=' + [...new Set(rows.map(r => Math.round(r.getBoundingClientRect().height)))]);
+    if (rows[0]) {
+      const ths = qa('.dict-table thead th');
+      out.push('表头各格: ' + ths.map((c, i) => i + ':' + box(c)).join(' | '));
+      out.push('首行各格: ' + [...rows[0].children].map((c, i) => i + ':' + box(c)).join(' | '));
+      out.push('表头/表体逐列宽度相等: ' + ths.every((th, i) => Math.round(th.getBoundingClientRect().width) === Math.round(rows[0].children[i].getBoundingClientRect().width)));
+    }
+    /* 可点击目标：WCAG 2.5.8 下限 24×24 */
+    const acts = qa('.dict-table tbody tr:first-child [data-act]');
+    out.push('操作按钮 ' + acts.length + ' 个: ' + acts.map(a => a.dataset.act + '[' + Math.round(a.getBoundingClientRect().width) + '×' + Math.round(a.getBoundingClientRect().height) + (a.disabled ? ' 禁用' : '') + ']').join(' '));
+    out.push('最小点击目标边长=' + Math.min(...acts.map(a => Math.min(a.getBoundingClientRect().width, a.getBoundingClientRect().height))).toFixed(1) + 'px（须 ≥24）');
+    /* 相邻按钮中心距：越小越容易误点 */
+    const cs = acts.map(a => { const r = a.getBoundingClientRect(); return r.left + r.width / 2; });
+    out.push('相邻按钮中心距=' + cs.slice(1).map((c, i) => (c - cs[i]).toFixed(0)).join('/') + 'px');
+    /* 输入框默认是否"隐形" */
+    const inp = q('.dict-item');
+    out.push('输入框默认边框色=' + getComputedStyle(inp).borderTopColor + '（应为 transparent）');
+
+    /* 左栏类别索引（注意限定 .dc-list —— 底部图例里也有 .dc-dot，不限定会数错）。
+       同时逐行核对名称有没有被省略号截掉：左栏固定 212px，类别名最长的
+       「单位（债权单位）」需要 ~152px，余量很紧。 */
+    const caps = qa('.dc-list .dc-item');
+    /* 注意别用 scrollWidth 当"文字宽度"：overflow:hidden 的元素在内容不溢出时
+       scrollWidth 会退化成 clientWidth，读出来等于盒子宽度，会误导判断。
+       要真宽就用 Range 量文字本身。 */
+    const textW = el => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width; };
+    const nameW = Math.max(...caps.map(c => Math.round(textW(c.querySelector('.dc-name')))));
+    const cw = caps.map(c => Math.round(c.querySelector('.dc-name').clientWidth));
+    const uniform = cw.every(v => Math.abs(v - cw[0]) < 1);
+    out.push('左栏类别 ' + caps.length + ' 行，行高集合=' + [...new Set(caps.map(c => Math.round(c.getBoundingClientRect().height)))]
+      + '，最宽名称实宽=' + nameW + 'px');
+    out.push('名称列宽: ' + (uniform
+      ? cw[0] + 'px（固定列，余量 ' + (cw[0] - nameW) + 'px）'
+      : '按胶囊内容自适应（窄屏横向滚动形态）'));
+    const cut = caps.filter(c => { const n = c.querySelector('.dc-name'); return n.scrollWidth > n.clientWidth + 1; });
+    out.push('名称被截断的类别: ' + (cut.length ? cut.map(c => c.querySelector('.dc-name').textContent).join(' , ') : '无 ✓'));
+    out.push('左栏溢出: ' + (q('.dc-list').scrollHeight > q('.dc-list').clientHeight + 1 ? '需滚动（' + q('.dc-list').scrollHeight + '>' + q('.dc-list').clientHeight + '）' : '无需滚动 ✓'));
+    out.push('已自定义标记=' + qa('.dc-list .dc-dot.is-db').length + ' 个 / 内置默认=' + qa('.dc-list .dc-dot:not(.is-db)').length + ' 个（合计应为 ' + caps.length + '）');
+    out.push('当前类别 isManaged=' + Dicts.isManaged(DictAdmin.current) + '  Dicts.cache 键=' + Object.keys(Dicts.cache).join(','));
+
+    out.push('新增输入框宽=' + Math.round(q('#dict-new').getBoundingClientRect().width) + 'px（旧版 904px 占满整行）');
+    const sb = q('[data-act="save"]');
+    out.push('保存按钮: ' + box(sb) + '  disabled=' + sb.disabled + '  文案=' + sb.textContent.trim());
+    out.push('左右栏分界 x=' + Math.round(q('.dict-cats').getBoundingClientRect().right) + ' = 右栏左缘 x=' + Math.round(q('.dict-main').getBoundingClientRect().left)
+      + '  Δ=' + Math.round(q('.dict-main').getBoundingClientRect().left - q('.dict-cats').getBoundingClientRect().right));
+
+    const d = document.createElement('pre');
+    /* white-space:pre 而不是 pre-wrap —— 换行会让读数穿插在后面板内容里看不清。
+       字号 16px 是必须的：截图工具会把 1440 宽的图缩到 1080 再给模型看，
+       10px 的读数缩放后只剩 7.5px，等于没读。 */
+    d.style.cssText = 'position:fixed;inset:0 0 auto 0;z-index:9999;margin:0;padding:8px 10px;' +
+      'background:#fff;color:#111;border-bottom:2px solid #c00;font:16px/1.5 monospace;white-space:pre;overflow-x:auto';
+    d.textContent = 'MEASURE>>\n' + out.join('\n');
+    document.body.appendChild(d);
+  }
+
+  document.title = '选项管理预览 · 已渲染';
+  document.body.dataset.ready = '1';
+})();
 </script>
 </body>
 </html>

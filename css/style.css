@@ -771,9 +771,166 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
 .exp-field input { accent-color: var(--primary); cursor: pointer; flex-shrink: 0; }
 
 /* ---------- 选项管理 ---------- */
-.dict-add-row { display: flex; gap: var(--s2); margin-top: var(--s4); flex-wrap: wrap; }
-.dict-add-row .ipt { width: auto; }
-.dict-item { font-variant-numeric: tabular-nums; }
+/* 双栏面板：左栏是类别索引（导航），右栏是当前类别的选项编辑区。
+   为什么不用「12 个胶囊排一行」：类别名长短不一（最宽「单位（债权单位）」122px），
+   横排要占满 1156px，且胶囊塞不下「项数」和「是否已自定义」这两个信息 ——
+   而财务最需要知道的就是「哪些类别还只是内置默认、没落过库」。
+   竖排还顺手解决了另一个问题：这个页元素极少，横排时内容只占顶部约 40%，
+   下方近半屏是空白；竖排的 12 行正好把高度用起来。 */
+#page-dict:not(.hidden) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+#page-dict .dict-panel { flex: 1; min-height: 0; }
+
+.dict-panel {
+  display: grid; grid-template-columns: 212px minmax(0, 1fr);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2);
+  box-shadow: var(--sh1); overflow: hidden; min-height: 360px;
+}
+
+/* — 左栏：类别索引 — */
+.dict-cats {
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--surface-2); border-right: 1px solid var(--line);
+}
+.dc-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 14px; border-bottom: 1px solid var(--line);
+  font-size: var(--t-xs); font-weight: 600; color: var(--ink-500); letter-spacing: 0.06em;
+}
+.dc-total { font-weight: 400; color: var(--ink-400); font-variant-numeric: tabular-nums; }
+.dc-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--s1) 0; }
+.dc-item {
+  display: flex; align-items: center; gap: var(--s2); width: 100%;
+  padding: 7px 14px; border: none; border-left: 2px solid transparent;
+  background: none; color: var(--ink-700);
+  font-family: var(--font); font-size: var(--t-sm); line-height: 1.5; text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-f) var(--ease), color var(--dur-f) var(--ease),
+              border-color var(--dur-f) var(--ease);
+}
+.dc-item:hover { background: var(--surface-3); color: var(--primary); }
+.dc-item.is-active {
+  background: var(--primary-soft); border-left-color: var(--primary);
+  color: var(--primary); font-weight: 600;
+}
+.dc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 项数固定宽度右对齐：否则「4」和「15」宽度不同，名称列会跟着前后差几像素，
+   12 行的左缘看起来就会参差 */
+.dc-num { width: 22px; flex-shrink: 0; text-align: right; font-size: var(--t-xs); color: var(--ink-400); font-variant-numeric: tabular-nums; }
+.dc-item.is-active .dc-num { color: var(--primary); }
+/* 已自定义（已在 ar_dict 落库）用实心点，内置默认用空心点 */
+.dc-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  border: 1px solid var(--ink-300); background: transparent;
+}
+.dc-dot.is-db { background: var(--primary); border-color: var(--primary); }
+.dc-legend {
+  display: flex; gap: var(--s3); flex-wrap: wrap;
+  padding: 8px 14px; border-top: 1px solid var(--line);
+  font-size: 11px; color: var(--ink-400);
+}
+.dc-legend span { display: inline-flex; align-items: center; gap: 5px; }
+
+/* — 右栏：当前类别编辑区 — */
+.dict-main { display: flex; flex-direction: column; min-height: 0; }
+.dm-head {
+  display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
+  padding: 10px 16px; border-bottom: 1px solid var(--line);
+}
+.dm-head h3 { font-size: var(--t-base); }
+.dm-count { margin-left: auto; font-size: var(--t-xs); color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.dm-warn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--t-xs); font-weight: 500; color: var(--warn);
+}
+.dm-warn::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--warn); box-shadow: 0 0 0 3px oklch(52% 0.12 66 / 0.16);
+}
+.dm-body { flex: 1; min-height: 0; overflow: auto; }
+
+/* — 选项表 — */
+.dict-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  font-size: var(--t-sm); font-variant-numeric: tabular-nums;
+}
+.dict-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--thead-bg); color: var(--ink-600);
+  font-size: var(--t-xs); font-weight: 600; letter-spacing: 0.01em;
+  text-align: left; padding: 7px 12px;
+  box-shadow: inset 0 -1px 0 var(--line-2);
+}
+.dict-table tbody td { border-bottom: 1px solid var(--line); }
+.dict-table tbody tr:last-child td { border-bottom: none; }
+.dict-table tbody tr:hover td,
+.dict-table tbody tr:focus-within td { background: var(--row-hover); }
+.dict-table .dt-idx {
+  width: 46px; text-align: right; padding: 8px 6px 8px 12px;
+  color: var(--ink-400); font-size: var(--t-xs);
+}
+.dict-table thead .dt-idx, .dict-table thead .dt-act { text-align: right; }
+.dict-table .dt-act { width: 118px; padding: 4px 10px; }
+.dict-table .dt-val { padding: 0; }
+/* 输入框默认"隐形"——看起来就是一行文本（像账簿里的条目）。
+   4 行 4 个 32px 描边输入框堆在一起是"一堆表单框"，噪音远大于信息；
+   hover 只为提示"这里能打字"，不改变行本身的观感。
+   line-height 用绝对值而非 1.5：13px×1.5=19.5 会让行高在 38/39 之间跳，
+   表格边框看起来一深一浅。 */
+.dict-item {
+  display: block; width: 100%;
+  padding: 8px 11px; margin: 0;
+  border: 1px solid transparent; border-radius: var(--r1);
+  background: transparent; color: var(--ink-700);
+  font-family: var(--font); font-size: var(--t-sm); line-height: 20px;
+  transition: background var(--dur-f) var(--ease), border-color var(--dur-f) var(--ease),
+              box-shadow var(--dur-f) var(--ease);
+}
+.dict-item:hover { border-color: var(--line-2); background: var(--surface); }
+.dict-item:focus {
+  border-color: var(--primary); background: var(--surface);
+  box-shadow: 0 0 0 3px oklch(45% 0.13 258 / 0.13); outline: none;
+}
+.dict-empty { padding: var(--s6) var(--s4) !important; text-align: center; line-height: 1.9; }
+.dict-empty b { display: block; color: var(--ink-700); font-weight: 600; }
+.dict-empty span { color: var(--ink-500); font-size: var(--t-xs); }
+.dict-empty::before {
+  content: "▤"; display: block; margin: 0 auto var(--s3);
+  width: 34px; height: 34px; line-height: 32px;
+  font-size: 14px; color: var(--ink-400);
+  border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface-2);
+}
+
+/* 操作按钮：旧版是 12×14px 的裸文本链接，三个紧挨着 —— 远低于 24×24 的可点击下限，
+   而且「上移」和「删除」只差十几像素，误点后一保存就真的删掉了。
+   删除额外左移一档：把"改顺序"和"不可逆"分成两组，手感上也分开。 */
+.dt-acts { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+.iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex-shrink: 0; padding: 0;
+  border: 1px solid transparent; border-radius: var(--r1);
+  background: transparent; color: var(--ink-500);
+  font-family: var(--font); font-size: 13px; line-height: 1;
+  cursor: pointer;
+  transition: background var(--dur-f) var(--ease), border-color var(--dur-f) var(--ease),
+              color var(--dur-f) var(--ease);
+}
+.iconbtn.is-del { margin-left: 6px; }
+.iconbtn:hover { background: var(--surface-3); border-color: var(--line-2); color: var(--primary); }
+.iconbtn.is-del:hover { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+.iconbtn:disabled, .iconbtn:disabled:hover {
+  color: var(--ink-300); background: transparent; border-color: transparent; cursor: not-allowed;
+}
+
+/* — 底部：新增 + 保存 — */
+.dm-foot {
+  display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+  padding: 10px 16px; border-top: 1px solid var(--line); background: var(--surface-2);
+}
+/* 新增输入框不必占满整行：旧版是 904px 宽，只输「微信」两个字却占掉大半屏 */
+.dm-add { display: flex; align-items: center; gap: var(--s2); flex: 1; min-width: 200px; max-width: 360px; }
+.dm-add .ipt { flex: 1; min-width: 0; min-height: 28px; padding: 5px 10px; font-size: var(--t-sm); }
+.dm-foot > .btn { margin-left: auto; }
+.dm-foot .editor-error { flex-basis: 100%; margin: 0; }
 
 /* 勾选框统一配色 */
 .row-check, .perm-toggle input, .cp-item input { accent-color: var(--primary); cursor: pointer; }
@@ -1162,6 +1319,23 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   .ledger-table th.col-actions, .ledger-table td.col-actions,
   .ledger-table tfoot td, .td-foot-label { position: static; box-shadow: none; }
   #page-ledger .table-wrap { min-height: 0; }
+  /* 选项管理：窄屏改为上下堆叠，类别索引变横向滚动条 —— 212px 固定左栏
+     在 600px 以下会把选项内容挤到放不下。
+     ⚠ 必须是 minmax(0, 1fr) 而不是 1fr：1fr 等价于 minmax(auto, 1fr)，
+     auto 的下限取内容的 min-content —— 而不换行的横向胶囊行的 min-content
+     就是 12 个胶囊宽度之和（实测 1337px），整张面板会被撑到视口外，
+     保存按钮与操作列全部跑到屏幕右边看不见。min-width:0 同理。 */
+  #page-dict .dict-panel { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .dict-cats { min-width: 0; border-right: none; border-bottom: 1px solid var(--line); }
+  .dc-head { display: none; }
+  .dc-list {
+    min-width: 0; display: flex; flex-wrap: nowrap;
+    overflow-x: auto; overflow-y: hidden; padding: 0; flex: 0 0 auto;
+  }
+  /* 胶囊不参与收缩：宁可横向滚动，也不要把名称压成省略号 */
+  .dc-item { flex: 0 0 auto; width: auto; border-left: none; border-bottom: 2px solid transparent; padding: 8px 12px; }
+  .dc-item.is-active { border-left-color: transparent; border-bottom-color: var(--primary); }
+  .dc-legend { display: none; }
 }
 @media (max-width: 460px) {
   .topbar-user .user-name { display: none; }
@@ -1195,6 +1369,14 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
   .ledger-table th.col-check, .ledger-table td.col-check,
   .ledger-table th.col-idx, .ledger-table td.col-idx { position: static; box-shadow: none; }
   .td-foot-label { position: static; box-shadow: none; }
+  /* 选项管理：纸上不需要操作列、底部按钮与左栏底色，全部退回普通流 */
+  .dict-panel { display: block; border-color: #bbb; box-shadow: none; }
+  .dict-cats { background: transparent; border-right: none; border-bottom: 1px solid #ccc; }
+  .dc-list { overflow: visible; }
+  .dict-main { display: block; }
+  .dm-body { overflow: visible; }
+  .dict-table .dt-act, .dm-foot { display: none !important; }
+  .dict-item { border: none; padding: 0; }
   a { color: inherit; text-decoration: none; }
 }
 

@@ -56,7 +56,9 @@
 │       ├── build-admin-preview.js      # 生成器：内联 CSS/JS → 用户管理单文件 HTML
 │       ├── admin-preview.html          # 产物（两个视角 + #perm-modal 打开编辑弹窗）
 │       ├── build-ledger-preview.js     # 生成器：内联 CSS/JS → 台账总览单文件 HTML
-│       └── ledger-preview.html         # 产物（含 #scrolled/#far/#core/#empty/#many/#measure 开关）
+│       ├── ledger-preview.html         # 产物（含 #scrolled/#far/#core/#empty/#many/#measure 开关）
+│       ├── build-dict-preview.js       # 生成器：内联 CSS/JS → 选项管理单文件 HTML
+│       └── dict-preview.html           # 产物（含 #managed/#many/#dirty/#confirm/#measure 开关）
 ├── sql/
 │   ├── init-new-instance.sql            # ★ 全新 Supabase 项目一键初始化（推荐，含回款明细）
 │   ├── schema-standalone.sql            # 基础建表（departments/profiles/ar_ 核心表）
@@ -78,6 +80,7 @@
 node docs/preview/build-dashboard-preview.js     # 重新生成 docs/preview/dashboard-preview.html
 node docs/preview/build-admin-preview.js         # 重新生成 docs/preview/admin-preview.html
 node docs/preview/build-ledger-preview.js        # 重新生成 docs/preview/ledger-preview.html
+node docs/preview/build-dict-preview.js          # 重新生成 docs/preview/dict-preview.html
 ```
 
 产物是**自包含单文件**（内联 `css/style.css` + 对应 JS + 模拟数据），双击即可打开：无需登录、不连数据库，用来核对版面与字号。**修改样式或对应页面代码后要重新跑一次**生成器，预览页才会同步。
@@ -105,6 +108,19 @@ node docs/preview/build-ledger-preview.js        # 重新生成 docs/preview/led
 | `#many` | 造 60 行（检验纵向滚动 + 表头/合计条固定） |
 | `#measure` | 注入探针浮层，打印冻结列实测宽度/边界与配色 |
 
+选项管理预览的 hash 场景：
+
+| hash | 场景 |
+| --- | --- |
+| （无） | 默认打开的第一个类别（`project_status`），**内置默认（未落库）** —— 灰色标签 + 主色「保存并启用」按钮 |
+| `#managed` | 已在 `ar_dict` 落库的类别（`client_attr`，15 项）—— 蓝色标签 + 「保存修改」 |
+| `#many` | 18 项长列表（`work_nature`）—— 检验列表内滚动 + 底部按钮固定 |
+| `#dirty` | 输入框里改一个字，触发「有未保存的修改」与按钮转主色 |
+| `#confirm` | 点第一行删除按钮，弹出二次确认 |
+| `#measure` | 注入探针浮层，打印面板填充高度 / 点击目标尺寸 / 列宽一致性 |
+
+> 预览的 `DB_DICT` 决定「哪些类别算已落库」：在里面的类别走「已自定义」，不在的走「内置默认」。**删掉某个类别时，左栏那个圆点会跟着变空心** —— 这是判断预览桩件是否与真实一致的最快办法。
+
 > **表格布局铁律一**：**不要给 `<td>` 直接写 `display:flex/grid`**。td 一旦退出表格布局，匿名单元格包裹会让表头与表体的列边界错位、单元格之间出现无色缝（看起来像"奇怪的方块 + 没对齐的线条"）。正确做法是 td 内再套一个 `<div>` 承载 flex/grid。
 
 > **表格布局铁律二**：**sticky 冻结列的 `left` 偏移必须严格等于该列的实际渲染宽度**。本表是 `table-layout: auto`（24 列按声明宽度会溢出，不能改 `fixed`），浏览器会把声明宽度**向内容最小宽度回缩**（声明 36px 实测只画到 29px）；若下一列仍按 `left:36px` 定位，两列之间就会露出正在横向滚动的单元格 —— 表现为「序号冻结后左边一片空白 + 文字残片穿帮」。因此宽度必须用同一变量在 `width` / `min-width` / `max-width` **三处同时锁死**：
@@ -116,6 +132,12 @@ node docs/preview/build-ledger-preview.js        # 重新生成 docs/preview/led
 > ```
 >
 > 改完请用 `#measure` 复核：两列宽度集合应恒为单值（`[36]` / `[40]`），且「冻结区右边界 x」应等于「下一列左边界 x」（间隙 0.0px）。
+
+> **布局铁律三**：**`grid-template-columns: 1fr` 会被内容撑爆，要写 `minmax(0, 1fr)`**。`1fr` 等价于 `minmax(auto, 1fr)`，而 `auto` 的下限取内容的 **min-content** —— 不换行的 flex 行（如选项管理窄屏下的横向胶囊条）的 min-content 就是全部子项宽度之和。2026-09-15 实测：选项管理面板在 620px 视口下被撑到 **1337px**，整块面板溢出视口，右侧的「保存」按钮与表格「操作」列全部跑到屏幕外看不见（而 1440px 下完全正常，极易漏掉）。同理，`overflow` 容器的祖先若在 flex/grid 里，也要补 `min-width: 0`。
+
+> **选项管理为什么用左侧竖排索引，而不用胶囊**（2026-09-15，用户确认）：全局偏好是「筛选一律胶囊、不用下拉」，但这一处的 12 个类别**不是筛选条件而是导航**，需要同时承载「项数」与「是否已落库」两个信息，胶囊塞不下；12 个类别横排一行要占满 1156px（最宽「单位（债权单位）」122px），找起来很费劲。改为 212px 左栏后，12 行 33px 正好把页面下方原本近半屏的空白填掉。**左侧索引只占 33px 行高、无边框，视觉重量低于表格，不违反"装饰降到最低"的调性。**
+
+> **选项管理的两处安全垫**（2026-09-15）：① 删除单个选项要二次确认 —— 旧版「✕」是 11×15px 的裸文本，紧贴着「↑↓」，误点后一保存就真的从库里删掉了；现在三个按钮都放大到 26×26，且删除额外左移 6px 与"改顺序"分开。② `save()` 是**先删后插**，而 PostgREST 单次请求无事务：`delete` 成功而 `insert` 失败时整类选项会被清空。现在先取一份**删除前的数据库快照**，插入失败就按原样写回（补偿事务）。**快照必须来自数据库而不是内存里的 `items`** —— 未落库的类别 `delete` 影响 0 行，若拿内置默认值当快照，回滚反而会把它误写成"已自定义"。
 
 > **空状态不要塞进表格里**：台账表宽可达 3000px+，`<td colspan="23">` 里的居中内容会落在**整表**的中点（约 x=1700），落在可视区之外 —— 也就是"一片空白什么都没有"。空状态改用独立的 `.table-wrap.is-empty` + `.empty-state` 面板，在可见区域内居中。
 
