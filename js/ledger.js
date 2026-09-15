@@ -13,7 +13,7 @@ const Ledger = {
   rows: [],                 // 当前可见台账数据
   settings: { warn_days: 90 },
   departments: [],          // 部门字典（ar_departments）
-  filters: { search: '', dept: '全部', project_status: '全部', debt_status: '全部', settled: '未结', batch: null },
+  filters: { search: '', dept: '全部', project_status: '全部', debt_status: '全部', client_attr: '全部', settled: '未结', batch: null },
   selected: new Set(),      // 勾选的行 id
   sortKey: null,
   sortDir: 1,
@@ -80,6 +80,7 @@ const Ledger = {
       if (deptId && r.department_id !== deptId) return false;
       if (this.filters.project_status !== '全部' && (r.project_status || '未填写') !== this.filters.project_status) return false;
       if (this.filters.debt_status !== '全部' && (r.debt_status || '未填写') !== this.filters.debt_status) return false;
+      if (this.filters.client_attr !== '全部' && (r.client_attr && String(r.client_attr).trim() || '未填写') !== this.filters.client_attr) return false;
       if (kw) {
         const hay = [r.contract_no, r.project_name, r.owner_unit, r.creditor_unit,
           r.collector, r.feedback, r.latest_progress, r.next_plan, r.remark, this.deptNameOf(r)]
@@ -95,6 +96,16 @@ const Ledger = {
     const counter = {};
     this.rows.forEach(r => {
       const k = this.deptNameOf(r);
+      counter[k] = (counter[k] || 0) + 1;
+    });
+    return Object.entries(counter).sort((a, b) => b[1] - a[1]).map(e => e[0]);
+  },
+
+  /** 客户属性胶囊选项（取自实际数据，按记录数排序） */
+  attrCaps() {
+    const counter = {};
+    this.rows.forEach(r => {
+      const k = r.client_attr && String(r.client_attr).trim() || '未填写';
       counter[k] = (counter[k] || 0) + 1;
     });
     return Object.entries(counter).sort((a, b) => b[1] - a[1]).map(e => e[0]);
@@ -124,15 +135,17 @@ const Ledger = {
 
   renderCapsules() {
     const depts = this.deptCaps();
+    const attrs = this.attrCaps();
     const statuses = ['全部', ...Dicts.get('project_status')];
     const debts = ['全部', ...Dicts.get('debt_status')];
     const cap = (group, val, cur) =>
       `<button class="capsule ${val === cur ? 'active' : ''}" data-group="${group}" data-val="${Utils.escapeHtml(val)}">${Utils.escapeHtml(val)}</button>`;
     return `
-      <div class="capsule-row"><span class="capsule-label">部门</span>${depts.length ? depts.map(d => cap('dept', d, this.filters.dept)).join('') : '<span class="muted">暂无数据</span>'}</div>
+      <div class="capsule-row"><span class="capsule-label">部门</span>${depts.length ? [cap('dept', '全部', this.filters.dept), ...depts.map(d => cap('dept', d, this.filters.dept))].join('') : '<span class="muted">暂无数据</span>'}</div>
       <div class="capsule-row"><span class="capsule-label">结清状态</span>${['未结', '已结清', '全部'].map(s => cap('settled', s, this.filters.settled)).join('')}</div>
       <div class="capsule-row"><span class="capsule-label">项目状态</span>${statuses.map(p => cap('project_status', p, this.filters.project_status)).join('')}</div>
-      <div class="capsule-row"><span class="capsule-label">债权状态</span>${debts.map(s => cap('debt_status', s, this.filters.debt_status)).join('')}</div>`;
+      <div class="capsule-row"><span class="capsule-label">债权状态</span>${debts.map(s => cap('debt_status', s, this.filters.debt_status)).join('')}</div>
+      <div class="capsule-row"><span class="capsule-label">客户属性</span>${attrs.length ? [cap('client_attr', '全部', this.filters.client_attr), ...attrs.map(a => cap('client_attr', a, this.filters.client_attr))].join('') : '<span class="muted">暂无数据</span>'}</div>`;
   },
 
   /** 当前显示的列定义（列设置过滤后） */

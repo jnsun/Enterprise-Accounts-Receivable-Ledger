@@ -65,6 +65,39 @@ const Dashboard = {
       .filter(([, v]) => v > 0)
       .sort((a, b) => b[1] - a[1]);
 
+    /* 客户应收余额 TOP10（按客户名称聚合） */
+    const byCust = {};
+    rows.forEach(r => {
+      const k = r.owner_unit && String(r.owner_unit).trim() || '未填写';
+      byCust[k] = (byCust[k] || 0) + Number(comp(r).receivable_balance || 0);
+    });
+    const custBars = Object.entries(byCust)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+    /* 客户属性欠款构成（按大类着色：内部单位/政府部门/煤矿集团/社会客户） */
+    const ATTR_GROUPS = [
+      ['内部单位', /^内部单位/, '#64748b'],
+      ['政府部门', /^政府部门/, '#2563eb'],
+      ['煤矿集团', /^煤矿集团/, '#ea580c'],
+      ['社会客户', /^社会客户/, '#0d9488'],
+      ['其他', /.*/, '#94a3b8'],
+    ];
+    const groupOf = name => ATTR_GROUPS.find(([, re]) => re.test(name))[0];
+    const byAttr = {};
+    rows.forEach(r => {
+      const k = r.client_attr && String(r.client_attr).trim() || '未填写';
+      byAttr[k] = (byAttr[k] || 0) + Number(comp(r).receivable_balance || 0);
+    });
+    const attrBars = Object.entries(byAttr)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1]);
+    const attrGroupTotals = {};
+    attrBars.forEach(([k, v]) => {
+      const g = groupOf(k);
+      attrGroupTotals[g] = (attrGroupTotals[g] || 0) + v;
+    });
+
     /* 催收跟踪 TOP10：欠款 > 0，优先逾期，再按最新催收时间最早
        欠款口径：决算已定 = 应收余额；决算未定 = 账内应收（开票−到账，照样要催） */
     const owedOf = r => {
@@ -117,6 +150,17 @@ const Dashboard = {
           <span class="muted">法人口径 · 按台账「单位」列聚合</span>
         </div>
         <div class="dash-card-body">${this.unitChart(unitBars)}</div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="dash-card">
+          <div class="dash-card-head"><h3>客户应收余额 TOP10</h3><span class="muted">催收对象排序 · 按客户名称聚合</span></div>
+          <div class="dash-card-body">${this.custChart(custBars)}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-head"><h3>客户属性欠款构成</h3><span class="muted">按 15 类客户属性聚合 · 大类着色</span></div>
+          <div class="dash-card-body">${this.attrChart(attrBars)}${this.attrLegend(attrGroupTotals)}</div>
+        </div>
       </div>
 
       <div class="dash-grid">
@@ -268,10 +312,37 @@ const Dashboard = {
     return this.barChart(bars, { color: '#0d9488', labelW: 76 });
   },
 
+  /* ---------- 客户条形图（长名称，标签加宽） ---------- */
+  custChart(bars) {
+    return this.barChart(bars, { color: '#7c3aed', labelW: 128, labelMax: 12 });
+  },
+
+  /* ---------- 客户属性条形图（按大类着色） ---------- */
+  attrChart(bars) {
+    const colorOf = name => {
+      const map = [[/^内部单位/, '#64748b'], [/^政府部门/, '#2563eb'], [/^煤矿集团/, '#ea580c'], [/^社会客户/, '#0d9488']];
+      const hit = map.find(([re]) => re.test(name));
+      return hit ? hit[1] : '#94a3b8';
+    };
+    return this.barChart(bars, { labelW: 118, labelMax: 10, colorBy: colorOf });
+  },
+
+  /* 客户属性大类图例（含各类合计） */
+  attrLegend(groupTotals) {
+    const entries = Object.entries(groupTotals).sort((a, b) => b[1] - a[1]);
+    if (!entries.length) return '';
+    const GROUP_COLORS = { '内部单位': '#64748b', '政府部门': '#2563eb', '煤矿集团': '#ea580c', '社会客户': '#0d9488' };
+    return `<div class="dash-legend">${entries.map(([g, v]) => `
+      <div class="dash-legend-item"><i style="background:${GROUP_COLORS[g] || '#94a3b8'}"></i>${g}
+        <b>${this.wan(v)}</b><span>欠款</span>
+      </div>`).join('')}</div>`;
+  },
+
   /* ---------- 通用水平条形图 ---------- */
   barChart(bars, opts = {}) {
     if (!bars.length) return '<div class="dash-empty-sm">无未清应收余额</div>';
     const color = opts.color || '#2563eb', labelW = opts.labelW || 92;
+    const labelMax = opts.labelMax || 7;
     const max = Math.max(...bars.map(b => b[1]));
     const W = 520, rowH = 34, barH = 16, valueW = 72;
     const H = bars.length * rowH + 8;
@@ -279,10 +350,11 @@ const Dashboard = {
     const svg = bars.map(([name, val], i) => {
       const y = 8 + i * rowH;
       const w = Math.max(3, innerW * val / max);
-      const label = name.length > 7 ? name.slice(0, 7) + '…' : name;
+      const barColor = opts.colorBy ? opts.colorBy(name) : color;
+      const label = name.length > labelMax ? name.slice(0, labelMax) + '…' : name;
       return `
         <text x="${labelW - 8}" y="${y + barH / 2 + 4}" text-anchor="end" font-size="12" fill="#64748b">${Utils.escapeHtml(label)}</text>
-        <rect x="${labelW}" y="${y}" width="${w}" height="${barH}" rx="3" fill="${color}" opacity="0.85"/>
+        <rect x="${labelW}" y="${y}" width="${w}" height="${barH}" rx="3" fill="${barColor}" opacity="0.85"/>
         <text x="${labelW + w + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="#1f2937" font-weight="600">${this.wan(val)}</text>`;
     }).join('');
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${svg}</svg>`;
