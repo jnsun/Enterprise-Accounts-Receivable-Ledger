@@ -199,6 +199,12 @@ const Ledger = {
         }
         if (f.type === 'date') return `<td class="ta-r td-date">${Utils.escapeHtml(v || '')}</td>`;
         if (f.key === 'project_name') return `<td class="td-name" title="${Utils.escapeHtml(v)}">${Utils.escapeHtml(Utils.clampName(v))}</td>`;
+        /* 归属部门为空时（多为导入时部门名对不上）用警示色标出来 ——
+           原先和普通单元格一个样子，整列「未指定」不容易被察觉。 */
+        if (f.key === 'department_id') {
+          const none = !r.department_id;
+          return `<td class="td-dept${none ? ' is-none' : ''}" title="${Utils.escapeHtml(none ? '这条记录没有归属部门' : v)}">${Utils.escapeHtml(v || '')}</td>`;
+        }
         if ((f.key === 'project_status' || f.key === 'debt_status') && v) {
           const cls = TAG_COLORS[v] || 'tag-gray';
           return `<td><span class="tag ${cls}">${Utils.escapeHtml(v)}</span></td>`;

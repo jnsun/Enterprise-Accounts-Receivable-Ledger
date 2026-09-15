@@ -1,3 +1,10 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Excel 导入预览 · 企业应收账款台账系统</title>
+<style>
 /* ==========================================================================
    企业应收账款台账系统 · 样式表
    设计语言：账簿工业风 Ledger Industrial（精确 / 稳重 / 克制）
@@ -1430,3 +1437,1072 @@ th.sorted::after { content: "▾"; margin-left: 3px; font-size: 9px; opacity: 0.
     scroll-behavior: auto !important;
   }
 }
+
+/* —— 预览页专属，不属于产品样式 —— */
+body { margin: 0; padding: 0; background: var(--surface-2); }
+.preview-note {
+  padding: 7px 18px; font-size: 12px; line-height: 1.7;
+  background: oklch(96% 0.03 258); color: oklch(38% 0.09 258);
+  border-bottom: 1px solid oklch(86% 0.065 258);
+}
+.preview-note b { font-weight: 600; }
+.preview-note code { background: oklch(93% 0.02 258); padding: 1px 4px; border-radius: 3px; }
+/* 模态框平时 position:fixed 覆盖整屏，这里让它落进文档流，
+   并解除 90vh / 内部滚动，方便一张图看全整步内容 */
+.modal-mask { position: static; background: none; padding: 0; display: block; animation: none; }
+.modal { margin: 0 auto; max-height: none; animation: none; }
+.modal-body { overflow: visible; }
+</style>
+</head>
+<body>
+<div class="preview-note">
+  <b>Excel 导入 · 第 3 步「预览确认」预览</b> · 合成数据 · 不连数据库 ·
+  同源：<code>css/style.css</code> + <code>js/importer.js</code> ·
+  <code>#resolved</code> 已就地指定归属 · <code>#nodeptcol</code> 无部门列 ·
+  <code>#unified</code> 统一归属 · <code>#measure</code> 打印几何测量
+</div>
+<script>/**
+ * fields.js - 台账字段定义（新指标体系 v3，依据《应收系统统计指标.xlsx》28 列）
+ *
+ * 台账表格 / 编辑表单 / Excel 导入映射 / 导出 共用。
+ *
+ * type: text | money | date | select | combo | textarea
+ *   - select: 下拉选择（dict 指定 ar_dict 类别；freeOther=true 时带「其他」自由填写）
+ *   - combo : 可输可选（datalist，dict 选项作建议，允许自由输入）
+ * width: 表格列宽（px）；money/date 列右对齐
+ * aliases: Excel 导入时用于自动匹配的候选表头名
+ * dict: 选项字典类别（ar_dict.category，选项可由财务管理员在「选项管理」页编辑）
+ * deptEditable: 实体部门（非管理员）可编辑（要求五：仅催收跟踪类字段）
+ * cls: 表格单元格附加 class（如 td-dept）
+ * noImport: 不参与导入映射与导入模板生成（该维度由导入端的专用目标承担）
+ *
+ * 自动计算口径（要求：账内应收 = 开票金额 − 到账金额；账外应收 = 决算金额 − 开票金额）：
+ *   receivable_internal / receivable_external / receivable_balance 均为虚拟计算列，不入库。
+ *
+ * 旧版字段（合同金额/开工完工日期/工程进度/付款节点/成本费用/应收合计/催收反馈等）
+ * 数据库保留、界面隐藏，需要时可随时恢复。
+ */
+
+const FIELD_DEFS = [
+  /* ---- 基本信息 ---- */
+  { key: 'contract_no',    label: '合同编号',     type: 'text',   width: 110, aliases: ['合同编号', '编号', '合同号'] },
+  { key: 'project_name',   label: '项目名称',     type: 'text',   width: 200, clamp: true, aliases: ['项目名称', '项目', '工程项目'] },
+  /* 归属部门：数据库列是 department_id（UUID），列上按「部门名」展示 ——
+     值由 ledger.js computeRow 派生（deptNameOf），表格 / 排序 / 导出共用同一口径。
+     ⚠️ 三处刻意「不参与」：
+       ① 编辑表单 —— 部门下拉由 ledger.js renderModal 独立渲染（#ed-department_id，仅管理员），
+          放进 FORM_GROUPS 会重复出现
+       ② 导入映射与模板 —— 导入端已有专用的虚拟目标「部门名称（归属部门）」，
+          模板首两列也已是「序号 / 部门名称」，故标 noImport 挡掉（见 importer.js）
+       ③ 非管理员的保存载荷 —— 既非 deptEditable 也不在 FORM_GROUPS[0]，
+          editableKeys() 会自然过滤掉，数据库字段保护触发器不受影响 */
+  { key: 'department_id',  label: '归属部门',     type: 'text',   width: 110, cls: 'td-dept', noImport: true,
+    aliases: ['归属部门', '部门', '部门名称'] },
+  { key: 'owner_unit',     label: '客户名称',     type: 'text',   width: 170, aliases: ['客户名称', '甲方单位', '甲方', '建设单位'], datalist: true },
+  { key: 'client_attr',    label: '客户属性',     type: 'select', width: 96,  dict: 'client_attr', freeOther: true, aliases: ['客户属性'] },
+  { key: 'creditor_unit',  label: '单位',         type: 'combo',  width: 130, dict: 'unit', aliases: ['单位', '债权单位', '乙方单位'] },
+  { key: 'work_nature',    label: '工作性质',     type: 'combo',  width: 96,  dict: 'work_nature', aliases: ['工作性质', '性质'] },
+  { key: 'sector',         label: '八大板块',     type: 'combo',  width: 96,  dict: 'sector', aliases: ['八大板块', '板块'] },
+
+  /* ---- 状态与金额 ---- */
+  { key: 'project_status', label: '项目状态',     type: 'select', width: 88,  dict: 'project_status', freeOther: true,
+    deptEditable: true, aliases: ['项目状态', '工程进度'] },
+  { key: 'final_method',   label: '决算方式',     type: 'select', width: 92,  dict: 'final_method', freeOther: true,
+    deptEditable: true, aliases: ['决算方式'] },
+  { key: 'charge_date',    label: '最新挂账时间', type: 'date',   width: 108,
+    aliases: ['最新挂账时间', '挂账时间', '挂账日期'], note: '= 最近一笔开票日期，登记开票明细时自动维护' },
+  { key: 'final_amount',   label: '决算金额',     type: 'money',  width: 92,  aliases: ['决算金额'] },
+  { key: 'invoiced_amount',label: '开票金额',     type: 'money',  width: 92,  aliases: ['开票金额', '已开发票金额'] },
+  { key: 'received_amount',label: '到账金额',     type: 'money',  width: 92,  aliases: ['到账金额', '已到账金额', '已回款'] },
+  { key: 'writeoff_amount',label: '核销金额',     type: 'money',  width: 92,  aliases: ['核销金额', '核销'] },
+
+  /* ---- 债权与催收（实体部门可编辑区） ---- */
+  { key: 'debt_status',    label: '债权状态',     type: 'select', width: 88,  dict: 'debt_status', freeOther: true,
+    deptEditable: true, aliases: ['债权状态'] },
+  { key: 'collector',      label: '清收责任人',   type: 'text',   width: 100,
+    deptEditable: true, aliases: ['清收责任人', '责任人'] },
+  { key: 'dunning_date',   label: '最新催收时间', type: 'date',   width: 108,
+    deptEditable: true, aliases: ['最新催收时间', '催收时间', '催收/询证日期', '催收日期', '询证日期'] },
+  { key: 'comm_method',    label: '沟通方式',     type: 'select', width: 104, dict: 'comm_method', freeOther: true,
+    deptEditable: true, aliases: ['沟通方式'] },
+  { key: 'feedback',       label: '对方反馈',     type: 'select', width: 150, dict: 'feedback', freeOther: true,
+    deptEditable: true, aliases: ['对方反馈', '反馈'] },
+  { key: 'latest_progress',label: '最新进展',     type: 'select', width: 140, dict: 'progress_note', freeOther: true,
+    deptEditable: true, aliases: ['最新进展', '进展'] },
+  { key: 'next_plan',      label: '下一步计划',   type: 'select', width: 130, dict: 'next_plan', freeOther: true,
+    deptEditable: true, aliases: ['下一步计划', '计划'] },
+  { key: 'remark',         label: '备注',         type: 'textarea', width: 150, aliases: ['备注'] },
+];
+
+/* 自动计算列（不对应数据库字段，前端实时计算） */
+const COMPUTED_DEFS = [
+  { key: 'receivable_internal', label: '账内应收金额', type: 'money', width: 102, formula: '= 开票 − 到账' },
+  { key: 'receivable_external', label: '账外应收金额', type: 'money', width: 102, formula: '= 决算 − 开票' },
+  { key: 'receivable_balance',  label: '应收余额',     type: 'money', width: 96,  formula: '= 决算 − 到账 − 核销' },
+  { key: 'attach_summary',      label: '附件类别及数量', type: 'text',  width: 130 },
+];
+
+const ALL_FIELDS = FIELD_DEFS.map(f => f.key);
+
+const MONEY_KEYS = FIELD_DEFS.filter(f => f.type === 'money').map(f => f.key);
+
+/* 编辑表单分组（要求一：一个项目一个界面，按业务分区展示全部要素） */
+const FORM_GROUPS = [
+  { key: 'base',    label: '基本信息', fields: ['contract_no', 'project_name', 'owner_unit', 'client_attr', 'creditor_unit', 'work_nature', 'sector'] },
+  { key: 'finance', label: '状态与金额', fields: ['project_status', 'final_method', 'charge_date', 'final_amount', 'invoiced_amount', 'received_amount', 'writeoff_amount'] },
+  { key: 'dunning', label: '债权与催收', fields: ['debt_status', 'collector', 'dunning_date', 'comm_method', 'feedback', 'latest_progress', 'next_plan', 'remark'] },
+];
+
+/* 字典类别定义（「选项管理」页展示顺序与说明） */
+const DICT_CATEGORIES = [
+  { key: 'project_status',  label: '项目状态' },
+  { key: 'final_method',    label: '决算方式' },
+  { key: 'debt_status',     label: '债权状态' },
+  { key: 'client_attr',     label: '客户属性' },
+  { key: 'comm_method',     label: '沟通方式' },
+  { key: 'feedback',        label: '对方反馈' },
+  { key: 'progress_note',   label: '最新进展' },
+  { key: 'next_plan',       label: '下一步计划' },
+  { key: 'attach_category', label: '附件类别' },
+  { key: 'unit',            label: '单位（债权单位）' },
+  { key: 'work_nature',     label: '工作性质' },
+  { key: 'sector',          label: '八大板块' },
+];
+
+/* 客户名称建议（内置 + 库内历史值自动并入 datalist） */
+const OWNER_UNIT_PRESETS = [
+  '山西省第十地质工程勘察院',
+];
+
+/* 权限定义（左侧权限栏 + 管理员授权页共用） */
+const PERM_DEFS = [
+  { key: 'view',     label: '查看本部门台账' },
+  { key: 'view_all', label: '查看全部台账' },
+  { key: 'add',      label: '新增记录' },
+  { key: 'edit',     label: '编辑记录' },
+  { key: 'delete',   label: '删除记录' },
+  { key: 'import',   label: 'Excel 导入' },
+  { key: 'export',   label: '导出 Excel' },
+];
+
+/* 标签颜色映射（表格中状态列的胶囊配色） */
+const TAG_COLORS = {
+  '完工': 'tag-green', '施工中': 'tag-blue', '中止': 'tag-orange', '取消或作废': 'tag-gray',
+  '正常': 'tag-green', '逾期': 'tag-overdue', '诉讼': 'tag-red', '和解': 'tag-teal',
+};
+</script>
+<script>/**
+ * utils.js - 通用工具（格式化 / DOM / 提示 / 确认框 / 防抖）
+ */
+
+const Utils = {
+
+  /** HTML 转义 */
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
+  /** 金额格式化：千分位，最多 2 位小数（整数不带小数点） */
+  fmtMoney(v) {
+    if (v === null || v === undefined || v === '') return '';
+    const n = Number(v);
+    if (!isFinite(n)) return String(v);
+    const fixed = Math.abs(n) >= 1000 ? n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : String(Math.round(n * 100) / 100);
+    return fixed;
+  },
+
+  /** 解析金额输入/Excel 单元格（支持千分位、字符串） */
+  parseMoney(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    const s = String(v).replace(/[,\s￥¥]/g, '').replace(/[（）()]/g, m => m === '（' || m === '(' ? '-' : '');
+    const n = Number(s);
+    return isFinite(n) && s !== '' ? n : null;
+  },
+
+  /** 日期格式化 YYYY-MM-DD */
+  fmtDate(v) {
+    if (!v) return '';
+    if (typeof v === 'string') {
+      const m = v.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})/);
+      if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+      const d = new Date(v);
+      return isNaN(d) ? v.slice(0, 10) : d.toISOString().slice(0, 10);
+    }
+    return '';
+  },
+
+  /**
+   * Excel 日期值 -> YYYY-MM-DD
+   * SheetJS cellDates 模式给 Date 对象；数字为 Excel 序列号
+   */
+  parseExcelDate(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (v instanceof Date && !isNaN(v)) {
+      return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+    }
+    if (typeof v === 'number' && v > 20000 && v < 80000) {
+      // Excel 序列号（1900 日期系统）
+      const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return d.toISOString().slice(0, 10);
+    }
+    const s = String(v).trim();
+    if (!s) return null;
+    const m = s.match(/^(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})日?$/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+    const d = new Date(s);
+    if (!isNaN(d) && d.getFullYear() > 1990) return d.toISOString().slice(0, 10);
+    return null;
+  },
+
+  /**
+   * 项目名称等长文本截断：≤3 行 × 每行 12 个汉字，超出以 … 结尾
+   */
+  clampName(str, maxLine = 12, maxLineCount = 3) {
+    const s = String(str || '');
+    if (!s) return '';
+    const limit = maxLine * maxLineCount;
+    if (s.length <= limit) return s;
+    return s.slice(0, limit) + '…';
+  },
+
+  /** 防抖 */
+  debounce(fn, wait = 300) {
+    let t = null;
+    return function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
+  },
+
+  /** 轻提示 */
+  toast(msg, type = 'info') {
+    let box = document.getElementById('toast-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'toast-box';
+      document.body.appendChild(box);
+    }
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    box.appendChild(el);
+    setTimeout(() => { el.classList.add('show'); }, 10);
+    setTimeout(() => {
+      el.classList.remove('show');
+      setTimeout(() => el.remove(), 300);
+    }, type === 'error' ? 4200 : 2600);
+  },
+
+  /**
+   * 确认框（Promise<boolean>）
+   * @param {string} message 支持 \n 换行
+   * @param {object} opts { title, danger, confirmText }
+   */
+  confirm(message, opts = {}) {
+    return new Promise(resolve => {
+      const old = document.getElementById('modal-confirm');
+      if (old) old.remove();
+      const el = document.createElement('div');
+      el.id = 'modal-confirm';
+      el.className = 'modal-mask';
+      el.innerHTML = `
+        <div class="modal modal-sm">
+          <div class="modal-header">${Utils.escapeHtml(opts.title || '请确认')}</div>
+          <div class="modal-body confirm-msg">${Utils.escapeHtml(message).replace(/\n/g, '<br>')}</div>
+          <div class="modal-footer">
+            <button class="btn" data-act="cancel">取消</button>
+            <button class="btn ${opts.danger ? 'btn-danger' : 'btn-primary'}" data-act="ok">${Utils.escapeHtml(opts.confirmText || '确定')}</button>
+          </div>
+        </div>`;
+      document.body.appendChild(el);
+      let sx = 0, sy = 0;
+      el.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
+      el.addEventListener('click', e => {
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+        if (e.target === el || e.target.closest('[data-act="cancel"]')) { el.remove(); resolve(false); }
+        else if (e.target.closest('[data-act="ok"]')) { el.remove(); resolve(true); }
+      });
+    });
+  },
+
+  /**
+   * 弹窗遮罩点击关闭（带拖拽误触保护：按下滑动超 6px 不关闭）
+   * @param {HTMLElement} mask 遮罩元素
+   * @param {Function} onClose 点击遮罩关闭时回调
+   */
+  bindMaskClose(mask, onClose) {
+    let sx = 0, sy = 0;
+    mask.addEventListener('mousedown', e => { sx = e.clientX; sy = e.clientY; });
+    mask.addEventListener('click', e => {
+      if (e.target !== mask) return;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+      onClose();
+    });
+  },
+
+  /** 密码强度评分（0-5）：长度≥8 / 大写 / 小写 / 数字 / 符号 各计 1 分 */
+  pwdScore(v) {
+    if (!v) return 0;
+    let s = 0;
+    if (v.length >= 8) s++;
+    if (/[A-Z]/.test(v)) s++;
+    if (/[a-z]/.test(v)) s++;
+    if (/[0-9]/.test(v)) s++;
+    if (/[^A-Za-z0-9]/.test(v)) s++;
+    return s;
+  },
+
+  /** 密码是否符合强密码规则（≥8 位 + 四类字符） */
+  pwdValid(v) { return this.pwdScore(v) >= 5; },
+
+  /** 给密码输入框绑定实时强度进度条（bar 进度条元素，hint 提示元素） */
+  bindPwdMeter(input, bar, hint) {
+    /* 色阶与设计令牌同源（oklch → sRGB）：灰 → 朱砂 → 琥珀 → 橄榄 → 绿 */
+    const colors = ['#e0e3e8', '#a74639', '#975800', '#756c00', '#53760e', '#137d41'];
+    const update = () => {
+      const v = input.value;
+      const s = this.pwdScore(v);
+      const ok = this.pwdValid(v);
+      bar.style.width = (v ? Math.max(s / 5 * 100, 8) : 0) + '%';
+      bar.style.background = v ? colors[s] : colors[0];
+      if (!v) {
+        hint.textContent = '至少 8 位，须同时包含大写字母、小写字母、数字和符号';
+        hint.classList.remove('ok');
+        return;
+      }
+      const missing = [];
+      if (v.length < 8) missing.push('至少 8 位');
+      if (!/[A-Z]/.test(v)) missing.push('大写字母');
+      if (!/[a-z]/.test(v)) missing.push('小写字母');
+      if (!/[0-9]/.test(v)) missing.push('数字');
+      if (!/[^A-Za-z0-9]/.test(v)) missing.push('符号');
+      hint.textContent = ok ? '✓ 密码强度合格' : '还缺：' + missing.join('、');
+      hint.classList.toggle('ok', ok);
+    };
+    input.addEventListener('input', update);
+    update();
+  },
+
+  /** 计算两个日期相差天数（b - a） */
+  daysBetween(a, b) {
+    if (!a || !b) return null;
+    const da = new Date(a + 'T00:00:00'), db = new Date(b + 'T00:00:00');
+    if (isNaN(da) || isNaN(db)) return null;
+    return Math.round((db - da) / 86400000);
+  },
+
+  /** 今天 YYYY-MM-DD */
+  today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  },
+
+  /**
+   * 说明（2026-09-15）：原 `overdueStatus()`（按完工日期 + 预警天数自动判定超期）
+   * 已删除。它引用的 receivable_total / end_date 是 v3 已废弃字段，且按
+   * CONTEXT.md / ADR-0002 的结论——本院"按合同期限几乎全部逾期"、自动判定无区分度，
+   * 债权状态改为人工维护（「债权状态」下拉）。系统不做自动逾期判定。
+   */
+};
+</script>
+<script>/**
+ * importer.js - Excel 导入模块（新指标体系 v3）
+ * 流程：选择文件 -> 字段自动匹配（可人工调整映射）-> 预览确认 -> 分批写入
+ *
+ * - 模板列：序号 / 部门名称（自动归属）+ 台账字段 + 合同金额（非工作量结算时自动带入决算）；账内/账外应收为自动计算列，无需导入
+ * - 「部门名称」列自动匹配数据归属部门（也可在导入时统一指定）
+ * - 支持按「合同编号」跳过重复或覆盖更新
+ *
+ * ⚠️ 两条踩过的坑，改代码时别再犯：
+ *   ① 「数据归属部门」「合同编号重复时」两个 <select> 只存在于第 1 步，进入第 2 步后
+ *      #import-body 被 innerHTML 整体替换、元素销毁。必须在选中时就写回 Importer 实例，
+ *      不能拖到 commit() 再读 DOM（那样恒得 null，设置静默失效）。
+ *   ② 部门名匹配不上时**绝不能静默写 null**。归属部门是台账第一维度，静默丢弃会让
+ *      「导入完成」与「列上全是未指定」同时成立，用户根本看不出问题在哪。
+ *      现在由 deptPlan() 统一判定，预览页预检 + 结果页点名告警，并支持就地指定归属。
+ */
+
+/* 可映射的导入目标：台账字段 + 虚拟「部门名称」（归属部门）+ 合同金额（旧字段，自动带入决算）
+   标了 noImport 的字段不在此列 —— 「归属部门」这一维度已由下面的虚拟「部门名称」目标承担，
+   否则会出现两个指向同一列的映射目标，用户无从选择。 */
+const IMPORT_TARGETS = [
+  { key: 'department', label: '部门名称（归属部门）', aliases: ['部门名称', '部门', '施工部门'], virtual: true },
+  { key: 'contract_amount', label: '合同金额（自动带入决算）', aliases: ['合同金额', '合同价', '合同额'] },
+  ...FIELD_DEFS.filter(f => !f.noImport).map(f => ({ key: f.key, label: f.label, aliases: f.aliases || [f.label] })),
+];
+
+const Importer = {
+
+  /** 前端动态生成导入模板（与字段定义自动同步，含示例行） */
+  downloadTemplate() {
+    const header = ['序号', '部门名称'];
+    /* 示例里的部门名取系统里真实存在的第一个部门。
+       原先写死一个库里没有的名字，配上「部门名匹配不上会告警」的预检，
+       等于用示例教用户填出告警 —— 示例反而变成坑。 */
+    const sampleDept = (Ledger.departments[0] && Ledger.departments[0].name) || '综合管理部门';
+    const sample = ['1', sampleDept];
+    /* noImport 字段跳过：模板首列已是「部门名称」，再加一列「归属部门」会让人以为要填两遍 */
+    FIELD_DEFS.filter(f => !f.noImport).forEach(f => {
+      header.push(f.label);
+      // 决算方式后补「合同金额」列（非工作量结算时自动带入决算金额，ADR-0003）
+      if (f.key === 'final_method') { header.push('合同金额'); sample.push(100); }
+      const map = {
+        contract_no: 'WH24-001', project_name: '某某某地质勘查项目二维地震勘探技术服务（示例行，导入前请删除）',
+        owner_unit: '某某煤业有限公司', client_attr: '政府部门--省', creditor_unit: '物化院',
+        work_nature: '综合物探', sector: '能源资源勘查开发', project_status: '完工', final_method: '合同金额',
+        charge_date: '2024-07-01', final_amount: 100, invoiced_amount: 80, received_amount: 50, writeoff_amount: 10,
+        debt_status: '正常', collector: '张三', dunning_date: '2025-06-30', comm_method: '电话',
+        feedback: '承认欠款，但资金紧张', latest_progress: '已发送第二次催款函', next_plan: '跟踪付款进度', remark: '示例备注',
+      };
+      sample.push(map[f.key] !== undefined ? map[f.key] : '');
+    });
+    const ws = XLSX.utils.aoa_to_sheet([header, sample]);
+    ws['!cols'] = header.map(h => ({ wch: Math.max(12, h.length * 2 + 2) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '导入模板');
+    XLSX.writeFile(wb, '应收账款导入模板.xlsx');
+  },
+
+  wb: null,           // 解析后的工作簿
+  sheetRows: null,    // 二维数组
+  headers: [],        // 表头行
+  mapping: [],        // 每列 -> 目标字段 key 或 ''
+  targetDept: 'auto', // auto | 部门id | none
+  dupMode: 'skip',    // skip | overwrite | insert
+  existingNos: new Map(), // 合同编号 -> 行（覆盖更新用）
+  fileName: '',       // 已选文件名（写入 ar_import_batches 用）
+  deptOverrides: new Map(), // 「部门名称」列里系统查无此名的值 -> 人工指定的部门 id（null = 暂不归属）
+
+  open() {
+    this.reset();
+    const old = document.getElementById('modal-import');
+    if (old) old.remove();
+    const el = document.createElement('div');
+    el.id = 'modal-import';
+    el.className = 'modal-mask';
+    el.innerHTML = `
+      <div class="modal modal-lg">
+        <div class="modal-header">导入 Excel <span class="modal-close" data-act="close">×</span></div>
+        <div class="modal-body" id="import-body"></div>
+      </div>`;
+    document.body.appendChild(el);
+    el.querySelector('[data-act="close"]').addEventListener('click', () => el.remove());
+    Utils.bindMaskClose(el, () => el.remove());
+    this.renderStepFile();
+  },
+
+  reset() {
+    this.wb = null; this.sheetRows = null; this.headers = [];
+    this.mapping = []; this.targetDept = 'auto'; this.dupMode = 'skip';
+    this.existingNos = new Map();
+    this.fileName = ''; this.deptOverrides = new Map();
+  },
+
+  /* ---------- 第 1 步：选择文件 ---------- */
+
+  renderStepFile() {
+    const deptOpts = ['<option value="auto">按「部门名称」列自动匹配</option>',
+      ...Ledger.departments.map(d => `<option value="${d.id}">${Utils.escapeHtml(d.name)}</option>`),
+      '<option value="none">不指定（仅管理员可见）</option>'].join('');
+    document.getElementById('import-body').innerHTML = `
+      <div class="import-step">
+        <div class="file-pick" id="file-pick">
+          <div class="fp-icon">⇪</div>
+          <div>点击选择或拖拽 Excel 文件到此处</div>
+          <div class="muted">支持 .xlsx / .xls · 建议使用标准模板（<a id="tpl-download">下载模板</a>）· 账内/账外应收自动计算，无需导入</div>
+        </div>
+        <input type="file" id="import-file" accept=".xlsx,.xls" class="hidden">
+        ${Auth.isAdmin ? `
+        <div class="di-entry">
+          按合同编号批量导入明细：
+          <a data-act="imp-inv">⇪ 开票明细</a> ·
+          <a data-act="imp-rec">⇪ 回款明细</a>
+          <span class="muted">（历史开票/回款 Excel，导入后自动同步金额与挂账时间）</span>
+        </div>` : ''}
+        <div class="form-grid import-opts">
+          <label class="form-field"><span class="ff-label">数据归属部门</span>
+            <select class="ipt" id="imp-dept">${deptOpts}</select></label>
+          <label class="form-field"><span class="ff-label">合同编号重复时</span>
+            <select class="ipt" id="imp-dup">
+              <option value="skip">跳过该行（不导入）</option>
+              <option value="overwrite">覆盖更新已有记录</option>
+              <option value="insert">仍然新增（允许重复）</option>
+            </select></label>
+        </div>
+        <div id="import-error" class="editor-error hidden"></div>
+      </div>`;
+
+    const pick = document.getElementById('file-pick');
+    const input = document.getElementById('import-file');
+
+    /* 「数据归属部门」「合同编号重复时」两个 <select> 只在第 1 步存在 ——
+       进入第 2 步时整个 #import-body 会被 innerHTML 替换掉，这两个元素随之销毁。
+       旧写法在 commit() 里才去读 DOM，恒取到 null，于是这两项设置形同虚设
+       （不管选什么都按 auto + skip 走）。这里改为选中即写回实例状态。 */
+    const deptSel = document.getElementById('imp-dept');
+    const dupSel = document.getElementById('imp-dup');
+    deptSel.value = this.targetDept;      // 从「调整映射」返回时回填上次选择
+    dupSel.value = this.dupMode;
+    deptSel.addEventListener('change', () => {
+      this.targetDept = deptSel.value;
+      // 换成统一指定 / 不指定后，先前针对具体部门名的人工指定已无意义
+      if (this.targetDept !== 'auto') this.deptOverrides.clear();
+    });
+    dupSel.addEventListener('change', () => { this.dupMode = dupSel.value; });
+
+    document.getElementById('tpl-download').addEventListener('click', e => {
+      e.stopPropagation();
+      this.downloadTemplate();
+    });
+    pick.addEventListener('click', () => input.click());
+    pick.addEventListener('dragover', e => { e.preventDefault(); pick.classList.add('drag'); });
+    pick.addEventListener('dragleave', () => pick.classList.remove('drag'));
+    pick.addEventListener('drop', e => {
+      e.preventDefault(); pick.classList.remove('drag');
+      if (e.dataTransfer.files.length) this.readFile(e.dataTransfer.files[0]);
+    });
+    input.addEventListener('change', () => { if (input.files.length) this.readFile(input.files[0]); });
+
+    // 明细批量导入入口（仅财务）
+    document.querySelector('.di-entry [data-act="imp-inv"]')?.addEventListener('click', () => {
+      document.getElementById('modal-import')?.remove();
+      DetailImporter.open('invoice');
+    });
+    document.querySelector('.di-entry [data-act="imp-rec"]')?.addEventListener('click', () => {
+      document.getElementById('modal-import')?.remove();
+      DetailImporter.open('receipt');
+    });
+  },
+
+  readFile(file) {
+    const errBox = document.getElementById('import-error');
+    errBox.classList.add('hidden');
+    this.fileName = file.name || '';       // 记住文件名：写入批次记录（原先读 #import-file，那时已被销毁，故批次恒显示「手工批次」）
+    this.deptOverrides.clear();            // 换了文件，先前的部门名人工指定不再适用
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        this.wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+        const ws = this.wb.Sheets[this.wb.SheetNames[0]];
+        this.sheetRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+        if (!this.sheetRows.length) throw new Error('表格内容为空');
+        this.detectHeaderAndMapping();
+        this.renderStepMapping();
+      } catch (err) {
+        errBox.textContent = '文件解析失败：' + (err.message || err);
+        errBox.classList.remove('hidden');
+      }
+    };
+    reader.onerror = () => {
+      errBox.textContent = '文件读取失败，请重试';
+      errBox.classList.remove('hidden');
+    };
+    reader.readAsArrayBuffer(file);
+  },
+
+  /* ---------- 第 2 步：字段映射 ---------- */
+
+  detectHeaderAndMapping() {
+    const norm = s => String(s || '').replace(/[\s()（）/／]/g, '').toLowerCase();
+    // 找表头行：前 10 行内与已知字段匹配数最多的一行
+    let best = { rowIdx: 0, score: -1 };
+    const known = new Set(IMPORT_TARGETS.flatMap(f => [f.label, ...f.aliases]).map(norm));
+    for (let i = 0; i < Math.min(10, this.sheetRows.length); i++) {
+      const row = this.sheetRows[i] || [];
+      let score = 0;
+      row.forEach(cell => { if (cell && known.has(norm(cell))) score++; });
+      if (score > best.score) best = { rowIdx: i, score };
+    }
+    this.headers = (this.sheetRows[best.rowIdx] || []).map(h => h === null || h === undefined ? '' : String(h).trim());
+    this.dataRows = this.sheetRows.slice(best.rowIdx + 1).filter(r => r && r.some(c => c !== null && c !== undefined && String(c).trim() !== ''));
+
+    // 自动匹配：表头精确 = label > alias > 归一化匹配
+    const byExact = new Map(), byAlias = new Map(), byNorm = new Map();
+    IMPORT_TARGETS.forEach(f => {
+      byExact.set(f.label, f.key);
+      f.aliases.forEach(a => { if (!byAlias.has(a)) byAlias.set(a, f.key); byNorm.set(norm(a), f.key); });
+      byNorm.set(norm(f.label), f.key);
+    });
+    this.mapping = this.headers.map(h => {
+      if (!h) return '';
+      if (byExact.has(h)) return byExact.get(h);
+      if (byAlias.has(h)) return byAlias.get(h);
+      return byNorm.get(norm(h)) || '';
+    });
+  },
+
+  renderStepMapping() {
+    const fieldOptions = key => {
+      const opts = ['<option value="">— 忽略该列 —</option>'];
+      IMPORT_TARGETS.forEach(f => {
+        opts.push(`<option value="${f.key}" ${f.key === key ? 'selected' : ''}>${f.label}</option>`);
+      });
+      return opts.join('');
+    };
+
+    const rows = this.headers.map((h, i) => {
+      const sample = this.dataRows[0] ? this.dataRows[0][i] : '';
+      const sampleStr = sample instanceof Date ? Utils.fmtDate(sample.toISOString().slice(0, 10))
+        : Utils.escapeHtml(sample === null || sample === undefined ? '' : String(sample)).slice(0, 24);
+      const matched = this.mapping[i] !== '';
+      return `<tr class="${matched ? '' : 'map-miss'}">
+        <td class="map-src" title="${Utils.escapeHtml(h)}">${Utils.escapeHtml(h || '（空列名）')}</td>
+        <td class="map-sample">${sampleStr}</td>
+        <td><select class="ipt map-select" data-col="${i}">${fieldOptions(this.mapping[i])}</select></td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('import-body').innerHTML = `
+      <div class="import-step">
+        <div class="import-meta">共识别 <b>${this.dataRows.length}</b> 条数据 · ${this.mapping.filter(Boolean).length}/${this.headers.filter(Boolean).length} 列已自动匹配
+          <span class="muted">（黄色行未匹配，请在右侧下拉中选择目标字段或忽略）</span></div>
+        <div class="table-wrap map-wrap">
+          <table class="map-table">
+            <thead><tr><th style="width:32%">Excel 列名</th><th style="width:24%">首行示例</th><th>导入到系统字段</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div id="import-error" class="editor-error hidden"></div>
+        <div class="modal-footer">
+          <button class="btn" data-act="back">← 重新选文件</button>
+          <button class="btn btn-primary" data-act="preview">下一步：预览确认</button>
+        </div>
+      </div>`;
+
+    const body = document.getElementById('import-body');
+    body.querySelector('[data-act="back"]').addEventListener('click', () => this.renderStepFile());
+    body.querySelectorAll('.map-select').forEach(sel => sel.addEventListener('change', () => {
+      this.mapping[Number(sel.dataset.col)] = sel.value;
+      // 同一目标字段只允许映射一列
+      body.querySelectorAll('.map-select').forEach(s2 => {
+        if (s2 !== sel && s2.value && s2.value === sel.value) s2.value = '';
+      });
+    }));
+    body.querySelector('[data-act="preview"]').addEventListener('click', () => this.renderStepPreview());
+  },
+
+  /* ---------- 部门归属预检 ----------
+     导入最容易踩的坑：Excel「部门名称」列里的名字系统里没有，代码直接写 null，
+     结果台账「归属部门」列整列显示「未指定」，而导入结果仍是「成功写入 N 条」。
+     这里把匹配情况提前算出来，让人在写入之前就能看见并补上。 */
+
+  /** 部门名归一化：去掉所有空白（含全角空格）+ 统一小写，降低「看着一样其实不等」的误判 */
+  normDept(s) { return String(s === null || s === undefined ? '' : s).replace(/[\s\u3000]/g, '').toLowerCase(); },
+
+  /**
+   * 部门归属计划：一次算出每行该归到哪个部门，以及哪些部门名系统里查不到。
+   * 预览预检与正式写入共用这一份结果，避免「预览说没问题、落库却是空」。
+   * @returns {{ci:number, rows:{name:string,deptId:string|null}[], missing:Map<string,number>}}
+   */
+  deptPlan() {
+    const ci = this.mapping.indexOf('department');
+    const byName = new Map();
+    Ledger.departments.forEach(d => {
+      byName.set(d.name, d.id);
+      byName.set(this.normDept(d.name), d.id);
+    });
+    const rows = [], missing = new Map();
+    if (ci >= 0) {
+      this.dataRows.forEach(r => {
+        const raw = r[ci];
+        const name = raw === null || raw === undefined ? '' : String(raw).trim();
+        let deptId = null, handled = false;
+        if (name) {
+          handled = this.deptOverrides.has(name);
+          if (handled) deptId = this.deptOverrides.get(name);
+          else deptId = byName.get(name) || byName.get(this.normDept(name)) || null;
+          if (!handled && deptId === null) missing.set(name, (missing.get(name) || 0) + 1);
+        }
+        rows.push({ name, deptId });
+      });
+    }
+    return { ci, rows, missing };
+  },
+
+  /** 未匹配部门名的处理面板（写入前把归属定下来；不匹配的名字也可选择「暂不归属」） */
+  renderDeptPlan(plan) {
+    if (!this.dataRows.length) return '';
+    if (this.targetDept === 'none') {
+      return `<div class="dept-check is-warn">你选择了「不指定」归属部门，本次导入的记录将没有部门归属，只有管理员能看到它们。</div>`;
+    }
+    if (this.targetDept !== 'auto') {
+      const d = Ledger.departments.find(x => x.id === this.targetDept);
+      return `<div class="dept-check is-ok">本次导入的记录将统一归属到「${Utils.escapeHtml(d ? d.name : '已选部门')}」，不再读取「部门名称」列。</div>`;
+    }
+    if (plan.ci < 0) {
+      return `<div class="dept-check is-warn">
+        <div class="dchk-title">⚠ 这张表里没找到可识别的「部门名称」列，也没有统一指定归属部门</div>
+        <div class="dchk-hint">继续导入的话，这些记录在台账「归属部门」列会全部显示「未指定」。
+          <a data-act="back-file">返回上一步统一指定一个部门</a>，或点下方「← 调整映射」把某列改为「部门名称（归属部门）」。</div>
+      </div>`;
+    }
+    const missNames = [...plan.missing.keys()];
+    if (!missNames.length) {
+      const n = plan.rows.filter(x => x.deptId).length;
+      return `<div class="dept-check is-ok">部门归属检查通过：${n} 行按「部门名称」列自动匹配到系统部门。</div>`;
+    }
+    const missRows = [...plan.missing.values()].reduce((a, b) => a + b, 0);
+    const opts = Ledger.departments
+      .map(d => `<option value="${d.id}">${Utils.escapeHtml(d.name)}</option>`).join('');
+    return `<div class="dept-check is-warn">
+      <div class="dchk-title">⚠ 有 <b>${missNames.length}</b> 个部门名称在系统中找不到，共 <b>${missRows}</b> 行无法自动归属</div>
+      <div class="dchk-hint">在下面直接指定归属部门即可（不会改动你的 Excel 原文件）。若确属新部门，建议先到「系统管理 → 部门」建好，再回来用「覆盖更新」模式重导。</div>
+      ${[...plan.missing.entries()].map(([name, cnt]) => {
+        const cur = this.deptOverrides.has(name) ? (this.deptOverrides.get(name) || '__none__') : '';
+        return `<div class="dchk-row${cur ? ' is-set' : ''}">
+          <span class="dchk-name" title="${Utils.escapeHtml(name)}">${Utils.escapeHtml(name)}</span>
+          <span class="dchk-cnt">${cnt} 行</span>
+          <select class="ipt dchk-sel" data-name="${Utils.escapeHtml(name)}" aria-label="为「${Utils.escapeHtml(name)}」指定归属部门">
+            <option value="">— 选择归属部门 —</option>
+            ${opts}
+            <option value="__none__" ${cur === '__none__' ? 'selected' : ''}>暂不归属（记为未指定）</option>
+          </select>
+        </div>`;
+      }).join('')}
+    </div>`;
+  },
+
+  /** 就地指定归属后刷新告警区计数与按钮文案（只改文本，不整页重绘，避免打断正在操作的下拉） */
+  refreshDeptPlan(body) {
+    const plan = this.deptPlan();
+    const left = [...plan.missing.values()].reduce((a, b) => a + b, 0);
+    const box = body.querySelector('.dept-check');
+    if (box) {
+      box.classList.toggle('is-warn', left > 0);
+      box.classList.toggle('is-ok', left === 0);
+    }
+    const title = body.querySelector('.dchk-title');
+    if (title) {
+      title.innerHTML = left
+        ? `⚠ 有 <b>${plan.missing.size}</b> 个部门名称在系统中找不到，共 <b>${left}</b> 行无法自动归属`
+        : '✓ 找不到的部门名都已指定归属，可以导入了';
+    }
+    // 全部指定完毕后提示文案已无用，收起来
+    body.querySelectorAll('.dchk-sel').forEach(s =>
+      s.closest('.dchk-row').classList.toggle('is-set', !!s.value));
+    const hint = body.querySelector('.dchk-hint');
+    if (hint) hint.classList.toggle('hidden', left === 0);
+    const btn = body.querySelector('#btn-commit');
+    if (btn) btn.textContent = this.commitLabel(left);
+  },
+
+  /** 「确认导入」按钮文案：把未归属行数写进按钮，避免点下去才发现 */
+  commitLabel(left) {
+    return `确认导入 ${this.dataRows.length} 条` + (left ? `（其中 ${left} 行未指定部门）` : '');
+  },
+
+  /* ---------- 第 3 步：预览 + 写入 ---------- */
+
+  buildPayload(colIdx, raw) {
+    const key = this.mapping[colIdx];
+    if (!key) return {};
+    if (key === 'department') return { __dept_name: raw === null || raw === undefined ? null : String(raw).trim() || null };
+    if (key === 'contract_amount') return { contract_amount: Utils.parseMoney(raw) };   // 旧字段，不在 FIELD_DEFS
+    const f = FIELD_DEFS.find(x => x.key === key);
+    if (!f) return {};
+    const row = {};
+    if (f.type === 'money') row[key] = Utils.parseMoney(raw);
+    else if (f.type === 'date') row[key] = Utils.parseExcelDate(raw);
+    else row[key] = raw === null || raw === undefined ? null : String(raw).trim() || null;
+    return row;
+  },
+
+  async renderStepPreview() {
+    const errBox = document.getElementById('import-error');
+    errBox.classList.add('hidden');
+    const previewRows = this.dataRows.slice(0, 5).map(r =>
+      this.headers.reduce((acc, _h, i) => Object.assign(acc, this.buildPayload(i, r[i])), {}));
+    const shownFields = [...new Set(this.mapping.filter(Boolean))];
+
+    const labelOf = k => (IMPORT_TARGETS.find(f => f.key === k) || {}).label || k;
+    const previewHtml = `
+      <div class="table-wrap" style="max-height:220px">
+        <table class="ledger-table">
+          <thead><tr>${shownFields.map(k => `<th>${labelOf(k)}</th>`).join('')}</tr></thead>
+          <tbody>${previewRows.map(r => `<tr>${shownFields.map(k => {
+            // 「部门名称」是虚拟目标，buildPayload 把它存进 __dept_name 而非同名字段，
+            // 直接按 k 取值会取到 undefined，预览里这一列恒为空白。
+            let v = k === 'department' ? r.__dept_name : r[k];
+            if (v === null || v === undefined) v = '';
+            const f = FIELD_DEFS.find(x => x.key === k);
+            if (f && f.type === 'money') return `<td class="ta-r td-money">${Utils.fmtMoney(v)}</td>`;
+            if (f && f.key === 'project_name') return `<td class="td-name">${Utils.escapeHtml(Utils.clampName(v))}</td>`;
+            return `<td>${Utils.escapeHtml(String(v))}</td>`;
+          }).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+
+    // 部门归属预检：把「哪几行会没有部门」提前摆出来
+    const plan = this.deptPlan();
+    const deptPlanHtml = this.renderDeptPlan(plan);
+    const leftNoDept = [...plan.missing.values()].reduce((a, b) => a + b, 0);
+    const deptScope = this.targetDept === 'auto' ? '按「部门名称」列自动匹配'
+      : this.targetDept === 'none' ? '不指定（仅管理员可见）'
+      : `统一归属到「${(Ledger.departments.find(d => d.id === this.targetDept) || {}).name || '已选部门'}」`;
+    const dupText = { skip: '跳过重复', overwrite: '覆盖更新', insert: '允许重复' }[this.dupMode] || this.dupMode;
+
+    document.getElementById('import-body').innerHTML = `
+      <div class="import-step">
+        <div class="import-meta">预览前 ${previewRows.length} 条（共 ${this.dataRows.length} 条）
+          <span class="muted">· 归属：${Utils.escapeHtml(deptScope)} · 合同编号重复：${dupText}</span></div>
+        ${previewHtml}
+        ${deptPlanHtml}
+        <div id="import-error" class="editor-error hidden"></div>
+        <div class="modal-footer">
+          <button class="btn" data-act="back">← 调整映射</button>
+          <button class="btn btn-primary" data-act="commit" id="btn-commit">${this.commitLabel(leftNoDept)}</button>
+        </div>
+      </div>`;
+
+    const body = document.getElementById('import-body');
+    body.querySelector('[data-act="back"]').addEventListener('click', () => this.renderStepMapping());
+    body.querySelector('[data-act="commit"]').addEventListener('click', () => this.commit());
+    body.querySelectorAll('.dchk-sel').forEach(sel => sel.addEventListener('change', () => {
+      const name = sel.dataset.name;
+      if (!sel.value) this.deptOverrides.delete(name);
+      else this.deptOverrides.set(name, sel.value === '__none__' ? null : sel.value);
+      this.refreshDeptPlan(body);
+    }));
+    body.querySelector('[data-act="back-file"]')?.addEventListener('click', () => this.renderStepFile());
+  },
+
+  async commit() {
+    const errBox = document.getElementById('import-error');
+    const btn = document.getElementById('btn-commit');
+    errBox.classList.add('hidden');
+    btn.disabled = true; btn.textContent = '导入中…';
+
+    /* targetDept / dupMode 在第 1 步选中时已写回实例 —— 进入第 2 步后 #imp-dept / #imp-dup
+       已被 innerHTML 替换销毁，旧写法在这里读 DOM 恒得 null，两项设置全部失效。 */
+
+    try {
+      let deptId = null;
+      const autoMatch = this.targetDept === 'auto';
+      if (!autoMatch && this.targetDept !== 'none') deptId = this.targetDept;
+      const plan = this.deptPlan();   // 与预览页共用同一份归属判断，杜绝「预览说没问题、落库却是空的」
+
+      // 查询已有合同编号（跳过/覆盖模式）
+      if (this.dupMode !== 'insert') {
+        const { data: existing, error: exErr } = await sb.from('ar_ledger').select('id, contract_no');
+        if (exErr) throw new Error('读取已有合同编号失败：' + exErr.message);
+        this.existingNos = new Map((existing || []).filter(r => r.contract_no).map(r => [r.contract_no.trim(), r.id]));
+      }
+
+      // 创建批次
+      const fileName = this.fileName || '手工批次';
+      const { data: batch, error: batchErr } = await sb.from('ar_import_batches')
+        .insert({ file_name: fileName, row_count: this.dataRows.length, imported_by: Auth.currentUser.id })
+        .select().single();
+      if (batchErr) throw new Error('创建导入批次失败：' + batchErr.message);
+
+      // 组装行
+      const toInsert = [], toUpdate = [];
+      let skipped = 0;
+      this.dataRows.forEach((raw, ri) => {
+        const obj = this.headers.reduce((acc, _h, i) => Object.assign(acc, this.buildPayload(i, raw[i])), {});
+        delete obj.__dept_name;   // 「部门名称」列原文，仅用于解析归属
+        if (!obj.contract_no && !obj.project_name) { skipped++; return; } // 空行跳过
+        obj.batch_id = batch.id;
+        // 归属部门一律取自 deptPlan（含预览页人工指定的映射）；取不到就留 null，
+        // 台账列显示「未指定」，并在导入结果里点名告警 —— 不再静默丢弃。
+        obj.department_id = autoMatch ? ((plan.rows[ri] || {}).deptId || null) : deptId;
+
+        const no = obj.contract_no ? String(obj.contract_no).trim() : null;
+        // ADR-0003 合同额带入规则：决算方式非「工作量」且决算金额为空 → 合同金额自动带入
+        if (obj.final_amount === null || obj.final_amount === undefined) {
+          if (obj.contract_amount !== null && obj.contract_amount !== undefined
+              && obj.final_method && obj.final_method !== '工作量') {
+            obj.final_amount = obj.contract_amount;
+          }
+        }
+        if (no && this.existingNos.has(no)) {
+          if (this.dupMode === 'skip') { skipped++; return; }
+          if (this.dupMode === 'overwrite') { toUpdate.push({ id: this.existingNos.get(no), payload: obj }); return; }
+        }
+        obj.created_by = Auth.currentUser.id;
+        toInsert.push(obj);
+      });
+
+      // 分批写入
+      let inserted = 0, updated = 0, failed = 0;
+      const CHUNK = 200;
+      for (let i = 0; i < toInsert.length; i += CHUNK) {
+        const { error } = await sb.from('ar_ledger').insert(toInsert.slice(i, i + CHUNK));
+        if (error) { failed += Math.min(CHUNK, toInsert.length - i); console.error(error); }
+        else inserted += Math.min(CHUNK, toInsert.length - i);
+      }
+      for (const item of toUpdate) {
+        const { id, payload } = item;
+        const { error } = await sb.from('ar_ledger').update(payload).eq('id', id);
+        if (error) { failed++; console.error(error); } else updated++;
+      }
+
+      // 更新批次实际行数
+      await sb.from('ar_import_batches').update({ row_count: inserted + updated }).eq('id', batch.id);
+
+      /* 没有归属部门的行数 —— 这是最容易让人误判「导入成功」的地方：
+         数据确实写进去了，但台账「归属部门」整列会是「未指定」。必须显式点名。 */
+      const noDept = [...toInsert, ...toUpdate.map(x => x.payload)].filter(o => !o.department_id).length;
+      const missNames = autoMatch ? [...plan.missing.keys()] : [];
+      const noDeptHtml = noDept ? `
+        <div class="dept-check is-warn done-dept">
+          <div class="dchk-title">⚠ 其中 <b>${noDept}</b> 条没有归属部门，台账「归属部门」列会显示「未指定」</div>
+          ${missNames.length ? `<div class="dchk-hint">原因：Excel「部门名称」列里的 ${missNames.map(n => `「${Utils.escapeHtml(n)}」`).join('、')} 在系统部门表中找不到。</div>` : ''}
+          <div class="dchk-hint">两种补法：① 先到「系统管理 → 部门」建好同名部门，再用「覆盖更新」模式重新导入，即可补上归属；② 把 Excel 里的部门名改成系统已有名称后重导。</div>
+        </div>` : '';
+
+      document.getElementById('import-body').innerHTML = `
+        <div class="import-step import-done">
+          <div class="done-icon ${(failed || noDept) ? 'warn' : 'ok'}">${(failed || noDept) ? '!' : '✓'}</div>
+          <div class="done-title">导入完成</div>
+          <div class="done-stats">成功写入 <b>${inserted + updated}</b> 条（新增 ${inserted} · 覆盖更新 ${updated}）${skipped ? ` · 跳过 ${skipped} 条` : ''}${failed ? ` · <span class="text-danger">失败 ${failed} 条</span>` : ''}</div>
+          ${noDeptHtml}
+          <div class="modal-footer">
+            <button class="btn" data-act="close2">关闭</button>
+            <button class="btn btn-primary" data-act="view-batch">查看本批数据</button>
+          </div>
+        </div>`;
+      document.getElementById('import-body').querySelector('[data-act="close2"]').addEventListener('click', () => {
+        document.getElementById('modal-import').remove();
+        Ledger.reload();
+      });
+      document.getElementById('import-body').querySelector('[data-act="view-batch"]').addEventListener('click', () => {
+        document.getElementById('modal-import').remove();
+        Ledger.filters.batch = batch.id;
+        App.navigate('ledger');
+        Batches.load();
+      });
+    } catch (err) {
+      errBox.textContent = err.message || String(err);
+      errBox.classList.remove('hidden');
+      btn.disabled = false; btn.textContent = `确认导入 ${this.dataRows.length} 条`;
+    }
+  },
+};
+</script>
+<script>
+/* ---------- 预览用数据与桩件（不连数据库） ---------- */
+const SHEET_ROWS = [["合同编号","项目名称","合同金额","决算金额","已开发票金额","已到账金额","账内应收金额","账外应收金额","应收合计","甲方单位","债权单位","开工日期","完工日期","付款节点","部门名称","工作性质","八大板块","成本费用","催收/询证日期"],"DEMO-001","示例项目名称 1 —— 二维地震勘探技术服务",10,10,10,5,5,0,5,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-002","示例项目名称 2 —— 二维地震勘探技术服务",20,20,20,10,10,0,10,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-003","示例项目名称 3 —— 二维地震勘探技术服务",30,30,30,15,15,0,15,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-004","示例项目名称 4 —— 二维地震勘探技术服务",40,40,40,20,20,0,20,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-005","示例项目名称 5 —— 二维地震勘探技术服务",50,50,50,25,25,0,25,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-006","示例项目名称 6 —— 二维地震勘探技术服务",60,60,60,30,30,0,30,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-007","示例项目名称 7 —— 二维地震勘探技术服务",70,70,70,35,35,0,35,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-008","示例项目名称 8 —— 二维地震勘探技术服务",80,80,80,40,40,0,40,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-009","示例项目名称 9 —— 二维地震勘探技术服务",90,90,90,45,45,0,45,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-010","示例项目名称 10 —— 二维地震勘探技术服务",100,100,100,50,50,0,50,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-011","示例项目名称 11 —— 二维地震勘探技术服务",110,110,110,55,55,0,55,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-012","示例项目名称 12 —— 二维地震勘探技术服务",120,120,120,60,60,0,60,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-013","示例项目名称 13 —— 二维地震勘探技术服务",130,130,130,65,65,0,65,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-014","示例项目名称 14 —— 二维地震勘探技术服务",140,140,140,70,70,0,70,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-015","示例项目名称 15 —— 二维地震勘探技术服务",150,150,150,75,75,0,75,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-016","示例项目名称 16 —— 二维地震勘探技术服务",160,160,160,80,80,0,80,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-017","示例项目名称 17 —— 二维地震勘探技术服务",170,170,170,85,85,0,85,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-018","示例项目名称 18 —— 二维地震勘探技术服务",180,180,180,90,90,0,90,"某某煤业有限公司","某某勘查院有限公司","","","","某分公司","","","","","DEMO-019","示例项目名称 19 —— 三维地震勘探技术服务",200,200,200,100,100,0,100,"某某能源有限公司","某某勘查院有限公司","","","","另一分公司","","","",""];
+const DEPTS = [{"id":"d-01","name":"综合所"},{"id":"d-02","name":"地质所"},{"id":"d-03","name":"工程所"},{"id":"d-04","name":"测量所"},{"id":"d-05","name":"测试所"},{"id":"d-06","name":"环境所"}];
+
+/* 台账预览只调 Importer；Ledger 只需给出部门字典 */
+const Ledger = { departments: DEPTS.slice(), reload() {} };
+const Auth = { isAdmin: true, isSuperAdmin: true, currentUser: { id: 'u1' } };
+const Attachments = { summaryText: () => '', count: () => 0 };
+const XLSX = { utils: {}, read() {}, writeFile() {} };
+
+/* PostgREST 替身：本预览只走到「预览确认」，不点导入，故只需可链式调用 */
+function makeChain() {
+  const o = { select: () => o, order: () => o, eq: () => o, limit: () => o,
+    maybeSingle: () => Promise.resolve({ data: null, error: null }),
+    single: () => Promise.resolve({ data: { id: 'batch-1' }, error: null }),
+    insert: () => o, update: () => o,
+    then: (res) => Promise.resolve({ data: [], error: null }).then(res) };
+  return o;
+}
+const sb = { from: () => makeChain() };
+
+(async () => {
+  const h = location.hash;
+  const modal = Importer.open();
+
+  /* 直接把「已选文件」的结果塞进去：本预览要验的是第 3 步的版面，
+     不必真的走一遍文件选择（无头环境里没有 FileReader 输入） */
+  Importer.fileName = '应收账款导入模板.xlsx';
+  Importer.sheetRows = SHEET_ROWS;
+  Importer.detectHeaderAndMapping();
+
+  if (h === '#nodeptcol') {
+    /* 模拟用户把「部门名称」列的下拉改成「忽略该列」 */
+    Importer.mapping = Importer.mapping.map(m => (m === 'department' ? '' : m));
+  }
+  if (h === '#unified') {
+    Importer.targetDept = DEPTS[2].id;   // 任取一个部门演示「统一归属」
+  }
+  if (h === '#resolved') {
+    const byName = new Map(DEPTS.map(d => [d.name, d.id]));
+    const ci = Importer.mapping.indexOf('department');
+    const names = [...new Set(Importer.dataRows.map(r => String(r[ci]).trim()))];
+    names.forEach((n, i) => {
+      if (!byName.has(n)) Importer.deptOverrides.set(n, DEPTS[(i + 2) % DEPTS.length].id);
+    });
+  }
+
+  Importer.renderStepMapping();
+  await Importer.renderStepPreview();
+
+  document.title = '导入预览 · 已渲染';
+  document.body.dataset.ready = '1';
+
+  /* 探针延后一拍再跑：刚写完 innerHTML 时盒模型尚未稳定，同一个元素两次
+     getBoundingClientRect 会给出互相矛盾的结果（实测「h55」与「底缘 y=528」并存）。 */
+  if (h === '#measure') setTimeout(runProbe, 600);
+})();
+
+function runProbe() {
+  const q = s => document.querySelector(s);
+  const qa = s => [...document.querySelectorAll(s)];
+  const box = e => { const r = e.getBoundingClientRect(); return 'L' + Math.round(r.left) + ' x' + Math.round(r.top) + ' w' + Math.round(r.width) + ' h' + Math.round(r.height); };
+  /* overflow:hidden 元素的 scrollWidth 在内容不溢出时会退化成 clientWidth，
+     量不出「文字到底需要多宽」。要真宽就用 Range 量文字本身。 */
+  const textW = el => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width; };
+  const out = [];
+
+  const panel = q('.dept-check');
+  out.push('告警面板: ' + (panel ? box(panel) + '  底缘 y=' + Math.round(panel.getBoundingClientRect().bottom) + '  class=' + panel.className : '不存在'));
+  out.push('面板溢出: ' + (panel && panel.scrollHeight > panel.clientHeight + 1
+    ? '内容被截（' + panel.scrollHeight + '>' + panel.clientHeight + '）' : '无 ✓'));
+  out.push('标题: ' + (q('.dchk-title') ? q('.dchk-title').textContent.trim() : '—'));
+
+  const rows = qa('.dchk-row');
+  out.push('未匹配部门行数=' + rows.length);
+  rows.forEach(r => {
+    const name = r.querySelector('.dchk-name');
+    const sel = r.querySelector('.dchk-sel');
+    const need = Math.round(textW(name));
+    out.push('  「' + name.textContent + '」 文字实宽=' + need
+      + ' 容器宽=' + Math.round(name.clientWidth)
+      + (need > name.clientWidth + 1 ? ' ⚠截断' : ' ✓')
+      + ' | 条数=' + r.querySelector('.dchk-cnt').textContent.trim()
+      + ' | 下拉 ' + Math.round(sel.getBoundingClientRect().width) + '×' + Math.round(sel.getBoundingClientRect().height)
+      + ' 选项=' + sel.options.length + ' 当前值=' + (sel.value || '（未选）'));
+  });
+
+  /* 行内元素是否互相压叠 / 间距是否过大 */
+  if (rows.length) {
+    const n = rows[0].querySelector('.dchk-name').getBoundingClientRect();
+    const c = rows[0].querySelector('.dchk-cnt').getBoundingClientRect();
+    const s = rows[0].querySelector('.dchk-sel').getBoundingClientRect();
+    out.push('首行: 名右缘 ' + Math.round(n.right) + ' → 数左缘 ' + Math.round(c.left)
+      + ' Δ=' + Math.round(c.left - n.right) + ' | 数右缘 ' + Math.round(c.right)
+      + ' → 下拉左缘 ' + Math.round(s.left) + '（Δ 大 = 名字与下拉之间留白多）');
+  }
+
+  const btn = q('#btn-commit');
+  out.push('主按钮: ' + (btn ? box(btn) + '  文案=「' + btn.textContent.trim() + '」' : '不存在'));
+  out.push('面板底缘 → 按钮顶缘 Δ=' + Math.round(btn.getBoundingClientRect().top - panel.getBoundingClientRect().bottom) + 'px');
+
+  /* 预览表：表头行高（旧版长表头会被挤成 5 行）+ 部门列是否真有值 */
+  const ths = qa('.ledger-table thead th');
+  const th = q('.ledger-table thead th');
+  const first = q('.ledger-table tbody tr');
+  out.push('预览表表头行数/高: ' + ths.length + ' 列, 行高=' + Math.round(th.getBoundingClientRect().height) + 'px（旧版长表头换行达 5 行）');
+  const di = ths.findIndex(t => t.textContent.trim() === '部门名称（归属部门）');
+  out.push('部门列索引=' + di + '  首行该格=「'
+    + (di >= 0 && first ? first.children[di].textContent.trim() : '—') + '」（旧代码恒为空白）');
+  out.push('预览表横向溢出: ' + (q('.table-wrap').scrollWidth > q('.table-wrap').clientWidth + 1
+    ? '需横向滚动（' + q('.table-wrap').scrollWidth + '>' + q('.table-wrap').clientWidth + '）' : '无需滚动'));
+
+  const d = document.createElement('pre');
+  d.style.cssText = 'position:fixed;inset:0 0 auto 0;z-index:9999;margin:0;padding:8px 10px;' +
+    'background:#fff;color:#111;border-bottom:2px solid #c00;font:15px/1.5 monospace;white-space:pre;overflow-x:auto';
+  d.textContent = 'MEASURE>>\n' + out.join('\n');
+  document.body.appendChild(d);
+}
+</script>
+</body>
+</html>

@@ -5,6 +5,14 @@
  * - 模板列：序号 / 部门名称（自动归属）+ 台账字段 + 合同金额（非工作量结算时自动带入决算）；账内/账外应收为自动计算列，无需导入
  * - 「部门名称」列自动匹配数据归属部门（也可在导入时统一指定）
  * - 支持按「合同编号」跳过重复或覆盖更新
+ *
+ * ⚠️ 两条踩过的坑，改代码时别再犯：
+ *   ① 「数据归属部门」「合同编号重复时」两个 <select> 只存在于第 1 步，进入第 2 步后
+ *      #import-body 被 innerHTML 整体替换、元素销毁。必须在选中时就写回 Importer 实例，
+ *      不能拖到 commit() 再读 DOM（那样恒得 null，设置静默失效）。
+ *   ② 部门名匹配不上时**绝不能静默写 null**。归属部门是台账第一维度，静默丢弃会让
+ *      「导入完成」与「列上全是未指定」同时成立，用户根本看不出问题在哪。
+ *      现在由 deptPlan() 统一判定，预览页预检 + 结果页点名告警，并支持就地指定归属。
  */
 
 /* 可映射的导入目标：台账字段 + 虚拟「部门名称」（归属部门）+ 合同金额（旧字段，自动带入决算）
@@ -21,7 +29,11 @@ const Importer = {
   /** 前端动态生成导入模板（与字段定义自动同步，含示例行） */
   downloadTemplate() {
     const header = ['序号', '部门名称'];
-    const sample = ['1', '物探一公司'];
+    /* 示例里的部门名取系统里真实存在的第一个部门。
+       原先写死一个库里没有的名字，配上「部门名匹配不上会告警」的预检，
+       等于用示例教用户填出告警 —— 示例反而变成坑。 */
+    const sampleDept = (Ledger.departments[0] && Ledger.departments[0].name) || '综合管理部门';
+    const sample = ['1', sampleDept];
     /* noImport 字段跳过：模板首列已是「部门名称」，再加一列「归属部门」会让人以为要填两遍 */
     FIELD_DEFS.filter(f => !f.noImport).forEach(f => {
       header.push(f.label);
@@ -51,6 +63,8 @@ const Importer = {
   targetDept: 'auto', // auto | 部门id | none
   dupMode: 'skip',    // skip | overwrite | insert
   existingNos: new Map(), // 合同编号 -> 行（覆盖更新用）
+  fileName: '',       // 已选文件名（写入 ar_import_batches 用）
+  deptOverrides: new Map(), // 「部门名称」列里系统查无此名的值 -> 人工指定的部门 id（null = 暂不归属）
 
   open() {
     this.reset();
@@ -74,6 +88,7 @@ const Importer = {
     this.wb = null; this.sheetRows = null; this.headers = [];
     this.mapping = []; this.targetDept = 'auto'; this.dupMode = 'skip';
     this.existingNos = new Map();
+    this.fileName = ''; this.deptOverrides = new Map();
   },
 
   /* ---------- 第 1 步：选择文件 ---------- */
@@ -112,6 +127,22 @@ const Importer = {
 
     const pick = document.getElementById('file-pick');
     const input = document.getElementById('import-file');
+
+    /* 「数据归属部门」「合同编号重复时」两个 <select> 只在第 1 步存在 ——
+       进入第 2 步时整个 #import-body 会被 innerHTML 替换掉，这两个元素随之销毁。
+       旧写法在 commit() 里才去读 DOM，恒取到 null，于是这两项设置形同虚设
+       （不管选什么都按 auto + skip 走）。这里改为选中即写回实例状态。 */
+    const deptSel = document.getElementById('imp-dept');
+    const dupSel = document.getElementById('imp-dup');
+    deptSel.value = this.targetDept;      // 从「调整映射」返回时回填上次选择
+    dupSel.value = this.dupMode;
+    deptSel.addEventListener('change', () => {
+      this.targetDept = deptSel.value;
+      // 换成统一指定 / 不指定后，先前针对具体部门名的人工指定已无意义
+      if (this.targetDept !== 'auto') this.deptOverrides.clear();
+    });
+    dupSel.addEventListener('change', () => { this.dupMode = dupSel.value; });
+
     document.getElementById('tpl-download').addEventListener('click', e => {
       e.stopPropagation();
       this.downloadTemplate();
@@ -139,6 +170,8 @@ const Importer = {
   readFile(file) {
     const errBox = document.getElementById('import-error');
     errBox.classList.add('hidden');
+    this.fileName = file.name || '';       // 记住文件名：写入批次记录（原先读 #import-file，那时已被销毁，故批次恒显示「手工批次」）
+    this.deptOverrides.clear();            // 换了文件，先前的部门名人工指定不再适用
     const reader = new FileReader();
     reader.onload = e => {
       try {
@@ -241,6 +274,116 @@ const Importer = {
     body.querySelector('[data-act="preview"]').addEventListener('click', () => this.renderStepPreview());
   },
 
+  /* ---------- 部门归属预检 ----------
+     导入最容易踩的坑：Excel「部门名称」列里的名字系统里没有，代码直接写 null，
+     结果台账「归属部门」列整列显示「未指定」，而导入结果仍是「成功写入 N 条」。
+     这里把匹配情况提前算出来，让人在写入之前就能看见并补上。 */
+
+  /** 部门名归一化：去掉所有空白（含全角空格）+ 统一小写，降低「看着一样其实不等」的误判 */
+  normDept(s) { return String(s === null || s === undefined ? '' : s).replace(/[\s\u3000]/g, '').toLowerCase(); },
+
+  /**
+   * 部门归属计划：一次算出每行该归到哪个部门，以及哪些部门名系统里查不到。
+   * 预览预检与正式写入共用这一份结果，避免「预览说没问题、落库却是空」。
+   * @returns {{ci:number, rows:{name:string,deptId:string|null}[], missing:Map<string,number>}}
+   */
+  deptPlan() {
+    const ci = this.mapping.indexOf('department');
+    const byName = new Map();
+    Ledger.departments.forEach(d => {
+      byName.set(d.name, d.id);
+      byName.set(this.normDept(d.name), d.id);
+    });
+    const rows = [], missing = new Map();
+    if (ci >= 0) {
+      this.dataRows.forEach(r => {
+        const raw = r[ci];
+        const name = raw === null || raw === undefined ? '' : String(raw).trim();
+        let deptId = null, handled = false;
+        if (name) {
+          handled = this.deptOverrides.has(name);
+          if (handled) deptId = this.deptOverrides.get(name);
+          else deptId = byName.get(name) || byName.get(this.normDept(name)) || null;
+          if (!handled && deptId === null) missing.set(name, (missing.get(name) || 0) + 1);
+        }
+        rows.push({ name, deptId });
+      });
+    }
+    return { ci, rows, missing };
+  },
+
+  /** 未匹配部门名的处理面板（写入前把归属定下来；不匹配的名字也可选择「暂不归属」） */
+  renderDeptPlan(plan) {
+    if (!this.dataRows.length) return '';
+    if (this.targetDept === 'none') {
+      return `<div class="dept-check is-warn">你选择了「不指定」归属部门，本次导入的记录将没有部门归属，只有管理员能看到它们。</div>`;
+    }
+    if (this.targetDept !== 'auto') {
+      const d = Ledger.departments.find(x => x.id === this.targetDept);
+      return `<div class="dept-check is-ok">本次导入的记录将统一归属到「${Utils.escapeHtml(d ? d.name : '已选部门')}」，不再读取「部门名称」列。</div>`;
+    }
+    if (plan.ci < 0) {
+      return `<div class="dept-check is-warn">
+        <div class="dchk-title">⚠ 这张表里没找到可识别的「部门名称」列，也没有统一指定归属部门</div>
+        <div class="dchk-hint">继续导入的话，这些记录在台账「归属部门」列会全部显示「未指定」。
+          <a data-act="back-file">返回上一步统一指定一个部门</a>，或点下方「← 调整映射」把某列改为「部门名称（归属部门）」。</div>
+      </div>`;
+    }
+    const missNames = [...plan.missing.keys()];
+    if (!missNames.length) {
+      const n = plan.rows.filter(x => x.deptId).length;
+      return `<div class="dept-check is-ok">部门归属检查通过：${n} 行按「部门名称」列自动匹配到系统部门。</div>`;
+    }
+    const missRows = [...plan.missing.values()].reduce((a, b) => a + b, 0);
+    const opts = Ledger.departments
+      .map(d => `<option value="${d.id}">${Utils.escapeHtml(d.name)}</option>`).join('');
+    return `<div class="dept-check is-warn">
+      <div class="dchk-title">⚠ 有 <b>${missNames.length}</b> 个部门名称在系统中找不到，共 <b>${missRows}</b> 行无法自动归属</div>
+      <div class="dchk-hint">在下面直接指定归属部门即可（不会改动你的 Excel 原文件）。若确属新部门，建议先到「系统管理 → 部门」建好，再回来用「覆盖更新」模式重导。</div>
+      ${[...plan.missing.entries()].map(([name, cnt]) => {
+        const cur = this.deptOverrides.has(name) ? (this.deptOverrides.get(name) || '__none__') : '';
+        return `<div class="dchk-row${cur ? ' is-set' : ''}">
+          <span class="dchk-name" title="${Utils.escapeHtml(name)}">${Utils.escapeHtml(name)}</span>
+          <span class="dchk-cnt">${cnt} 行</span>
+          <select class="ipt dchk-sel" data-name="${Utils.escapeHtml(name)}" aria-label="为「${Utils.escapeHtml(name)}」指定归属部门">
+            <option value="">— 选择归属部门 —</option>
+            ${opts}
+            <option value="__none__" ${cur === '__none__' ? 'selected' : ''}>暂不归属（记为未指定）</option>
+          </select>
+        </div>`;
+      }).join('')}
+    </div>`;
+  },
+
+  /** 就地指定归属后刷新告警区计数与按钮文案（只改文本，不整页重绘，避免打断正在操作的下拉） */
+  refreshDeptPlan(body) {
+    const plan = this.deptPlan();
+    const left = [...plan.missing.values()].reduce((a, b) => a + b, 0);
+    const box = body.querySelector('.dept-check');
+    if (box) {
+      box.classList.toggle('is-warn', left > 0);
+      box.classList.toggle('is-ok', left === 0);
+    }
+    const title = body.querySelector('.dchk-title');
+    if (title) {
+      title.innerHTML = left
+        ? `⚠ 有 <b>${plan.missing.size}</b> 个部门名称在系统中找不到，共 <b>${left}</b> 行无法自动归属`
+        : '✓ 找不到的部门名都已指定归属，可以导入了';
+    }
+    // 全部指定完毕后提示文案已无用，收起来
+    body.querySelectorAll('.dchk-sel').forEach(s =>
+      s.closest('.dchk-row').classList.toggle('is-set', !!s.value));
+    const hint = body.querySelector('.dchk-hint');
+    if (hint) hint.classList.toggle('hidden', left === 0);
+    const btn = body.querySelector('#btn-commit');
+    if (btn) btn.textContent = this.commitLabel(left);
+  },
+
+  /** 「确认导入」按钮文案：把未归属行数写进按钮，避免点下去才发现 */
+  commitLabel(left) {
+    return `确认导入 ${this.dataRows.length} 条` + (left ? `（其中 ${left} 行未指定部门）` : '');
+  },
+
   /* ---------- 第 3 步：预览 + 写入 ---------- */
 
   buildPayload(colIdx, raw) {
@@ -270,7 +413,10 @@ const Importer = {
         <table class="ledger-table">
           <thead><tr>${shownFields.map(k => `<th>${labelOf(k)}</th>`).join('')}</tr></thead>
           <tbody>${previewRows.map(r => `<tr>${shownFields.map(k => {
-            let v = r[k]; if (v === null || v === undefined) v = '';
+            // 「部门名称」是虚拟目标，buildPayload 把它存进 __dept_name 而非同名字段，
+            // 直接按 k 取值会取到 undefined，预览里这一列恒为空白。
+            let v = k === 'department' ? r.__dept_name : r[k];
+            if (v === null || v === undefined) v = '';
             const f = FIELD_DEFS.find(x => x.key === k);
             if (f && f.type === 'money') return `<td class="ta-r td-money">${Utils.fmtMoney(v)}</td>`;
             if (f && f.key === 'project_name') return `<td class="td-name">${Utils.escapeHtml(Utils.clampName(v))}</td>`;
@@ -279,20 +425,38 @@ const Importer = {
         </table>
       </div>`;
 
+    // 部门归属预检：把「哪几行会没有部门」提前摆出来
+    const plan = this.deptPlan();
+    const deptPlanHtml = this.renderDeptPlan(plan);
+    const leftNoDept = [...plan.missing.values()].reduce((a, b) => a + b, 0);
+    const deptScope = this.targetDept === 'auto' ? '按「部门名称」列自动匹配'
+      : this.targetDept === 'none' ? '不指定（仅管理员可见）'
+      : `统一归属到「${(Ledger.departments.find(d => d.id === this.targetDept) || {}).name || '已选部门'}」`;
+    const dupText = { skip: '跳过重复', overwrite: '覆盖更新', insert: '允许重复' }[this.dupMode] || this.dupMode;
+
     document.getElementById('import-body').innerHTML = `
       <div class="import-step">
-        <div class="import-meta">预览前 ${previewRows.length} 条（共 ${this.dataRows.length} 条）</div>
+        <div class="import-meta">预览前 ${previewRows.length} 条（共 ${this.dataRows.length} 条）
+          <span class="muted">· 归属：${Utils.escapeHtml(deptScope)} · 合同编号重复：${dupText}</span></div>
         ${previewHtml}
+        ${deptPlanHtml}
         <div id="import-error" class="editor-error hidden"></div>
         <div class="modal-footer">
           <button class="btn" data-act="back">← 调整映射</button>
-          <button class="btn btn-primary" data-act="commit" id="btn-commit">确认导入 ${this.dataRows.length} 条</button>
+          <button class="btn btn-primary" data-act="commit" id="btn-commit">${this.commitLabel(leftNoDept)}</button>
         </div>
       </div>`;
 
     const body = document.getElementById('import-body');
     body.querySelector('[data-act="back"]').addEventListener('click', () => this.renderStepMapping());
     body.querySelector('[data-act="commit"]').addEventListener('click', () => this.commit());
+    body.querySelectorAll('.dchk-sel').forEach(sel => sel.addEventListener('change', () => {
+      const name = sel.dataset.name;
+      if (!sel.value) this.deptOverrides.delete(name);
+      else this.deptOverrides.set(name, sel.value === '__none__' ? null : sel.value);
+      this.refreshDeptPlan(body);
+    }));
+    body.querySelector('[data-act="back-file"]')?.addEventListener('click', () => this.renderStepFile());
   },
 
   async commit() {
@@ -301,26 +465,24 @@ const Importer = {
     errBox.classList.add('hidden');
     btn.disabled = true; btn.textContent = '导入中…';
 
-    const deptSel = document.getElementById('imp-dept');
-    const dupSel = document.getElementById('imp-dup');
-    if (deptSel) this.targetDept = deptSel.value;
-    if (dupSel) this.dupMode = dupSel.value;
+    /* targetDept / dupMode 在第 1 步选中时已写回实例 —— 进入第 2 步后 #imp-dept / #imp-dup
+       已被 innerHTML 替换销毁，旧写法在这里读 DOM 恒得 null，两项设置全部失效。 */
 
     try {
       let deptId = null;
-      let autoMatch = false;
-      if (this.targetDept === 'auto') autoMatch = true;
-      else if (this.targetDept !== 'none') deptId = this.targetDept;
-      const deptByName = new Map(Ledger.departments.map(d => [d.name, d.id]));
+      const autoMatch = this.targetDept === 'auto';
+      if (!autoMatch && this.targetDept !== 'none') deptId = this.targetDept;
+      const plan = this.deptPlan();   // 与预览页共用同一份归属判断，杜绝「预览说没问题、落库却是空的」
 
       // 查询已有合同编号（跳过/覆盖模式）
       if (this.dupMode !== 'insert') {
-        const { data: existing } = await sb.from('ar_ledger').select('id, contract_no');
+        const { data: existing, error: exErr } = await sb.from('ar_ledger').select('id, contract_no');
+        if (exErr) throw new Error('读取已有合同编号失败：' + exErr.message);
         this.existingNos = new Map((existing || []).filter(r => r.contract_no).map(r => [r.contract_no.trim(), r.id]));
       }
 
       // 创建批次
-      const fileName = (document.getElementById('import-file')?.files[0]?.name) || '手工批次';
+      const fileName = this.fileName || '手工批次';
       const { data: batch, error: batchErr } = await sb.from('ar_import_batches')
         .insert({ file_name: fileName, row_count: this.dataRows.length, imported_by: Auth.currentUser.id })
         .select().single();
@@ -329,17 +491,14 @@ const Importer = {
       // 组装行
       const toInsert = [], toUpdate = [];
       let skipped = 0;
-      this.dataRows.forEach(raw => {
+      this.dataRows.forEach((raw, ri) => {
         const obj = this.headers.reduce((acc, _h, i) => Object.assign(acc, this.buildPayload(i, raw[i])), {});
-        const deptNameFromCol = obj.__dept_name;   // 「部门名称」列
-        delete obj.__dept_name;
+        delete obj.__dept_name;   // 「部门名称」列原文，仅用于解析归属
         if (!obj.contract_no && !obj.project_name) { skipped++; return; } // 空行跳过
         obj.batch_id = batch.id;
-        if (autoMatch) {
-          obj.department_id = (deptNameFromCol && deptByName.get(deptNameFromCol)) || null;
-        } else {
-          obj.department_id = deptId;
-        }
+        // 归属部门一律取自 deptPlan（含预览页人工指定的映射）；取不到就留 null，
+        // 台账列显示「未指定」，并在导入结果里点名告警 —— 不再静默丢弃。
+        obj.department_id = autoMatch ? ((plan.rows[ri] || {}).deptId || null) : deptId;
 
         const no = obj.contract_no ? String(obj.contract_no).trim() : null;
         // ADR-0003 合同额带入规则：决算方式非「工作量」且决算金额为空 → 合同金额自动带入
@@ -374,11 +533,23 @@ const Importer = {
       // 更新批次实际行数
       await sb.from('ar_import_batches').update({ row_count: inserted + updated }).eq('id', batch.id);
 
+      /* 没有归属部门的行数 —— 这是最容易让人误判「导入成功」的地方：
+         数据确实写进去了，但台账「归属部门」整列会是「未指定」。必须显式点名。 */
+      const noDept = [...toInsert, ...toUpdate.map(x => x.payload)].filter(o => !o.department_id).length;
+      const missNames = autoMatch ? [...plan.missing.keys()] : [];
+      const noDeptHtml = noDept ? `
+        <div class="dept-check is-warn done-dept">
+          <div class="dchk-title">⚠ 其中 <b>${noDept}</b> 条没有归属部门，台账「归属部门」列会显示「未指定」</div>
+          ${missNames.length ? `<div class="dchk-hint">原因：Excel「部门名称」列里的 ${missNames.map(n => `「${Utils.escapeHtml(n)}」`).join('、')} 在系统部门表中找不到。</div>` : ''}
+          <div class="dchk-hint">两种补法：① 先到「系统管理 → 部门」建好同名部门，再用「覆盖更新」模式重新导入，即可补上归属；② 把 Excel 里的部门名改成系统已有名称后重导。</div>
+        </div>` : '';
+
       document.getElementById('import-body').innerHTML = `
         <div class="import-step import-done">
-          <div class="done-icon ${failed ? 'warn' : 'ok'}">${failed ? '!' : '✓'}</div>
+          <div class="done-icon ${(failed || noDept) ? 'warn' : 'ok'}">${(failed || noDept) ? '!' : '✓'}</div>
           <div class="done-title">导入完成</div>
           <div class="done-stats">成功写入 <b>${inserted + updated}</b> 条（新增 ${inserted} · 覆盖更新 ${updated}）${skipped ? ` · 跳过 ${skipped} 条` : ''}${failed ? ` · <span class="text-danger">失败 ${failed} 条</span>` : ''}</div>
+          ${noDeptHtml}
           <div class="modal-footer">
             <button class="btn" data-act="close2">关闭</button>
             <button class="btn btn-primary" data-act="view-batch">查看本批数据</button>
