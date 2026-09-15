@@ -1986,6 +1986,35 @@ const Dashboard = {
     return String(Math.round(v));
   },
 
+  /** 文本像素宽度估算 —— SVG 里我们是**拼字符串**，没有布局引擎可查。
+   *  汉字/全角 ≈ 1em，数字/字母/半角标点 ≈ 0.55em。
+   *  绝不能拿「字数」当宽度：中英混排时必然失准（见 fitLabel 的注释）。 */
+  textW(str, fontSize) {
+    let w = 0;
+    for (const ch of String(str)) w += ch.charCodeAt(0) > 0x2e80 ? fontSize : fontSize * 0.55;
+    return w;
+  },
+
+  /** 把标签截到不超过 maxPx（末尾补省略号），**从头部截**。
+   *  历史 bug（用户报告「名称很长的显示不全，只能看到中间几个字」）：
+   *    原先按「字数」截断（客户图 labelMax = 12 字 → 144px），而该图标签区
+   *    可用宽度只有 122px，又用 text-anchor="end" 右对齐定位 → 文字向左溢出
+   *    被 SVG 裁掉开头，屏幕上只剩中间一段（实测「山西普能控股集团某煤业有…」
+   *    左溢 34px）。宽度必须按像素算，且截断必须发生在尾部。 */
+  fitLabel(str, maxPx, fontSize) {
+    const s = String(str);
+    if (this.textW(s, fontSize) <= maxPx) return s;
+    const ellW = fontSize;                       // 「…」按 1em 计（保守）
+    let out = '';
+    let w = 0;
+    for (const ch of s) {
+      const cw = ch.charCodeAt(0) > 0x2e80 ? fontSize : fontSize * 0.55;
+      if (w + cw + ellW > maxPx) break;
+      out += ch; w += cw;
+    }
+    return (out || s.charAt(0)) + '…';
+  },
+
   /* ---------- 部门条形图（责任口径） ---------- */
   deptChart(bars, W) {
     return this.barChart(bars, {
@@ -2002,10 +2031,10 @@ const Dashboard = {
     }, W);
   },
 
-  /* ---------- 客户条形图（长名称，标签加宽） ---------- */
+  /* ---------- 客户条形图（客户名普遍长，标签列上限放宽） ---------- */
   custChart(bars, W) {
     return this.barChart(bars, {
-      color: C_PRIMARY, labelW: 132, labelMax: 12, title: '客户应收余额',
+      color: C_PRIMARY, labelW: 132, maxLabelW: 200, title: '客户应收余额',
       empty: this.EMPTY_OWED,
     }, W);
   },
@@ -2013,7 +2042,7 @@ const Dashboard = {
   /* ---------- 客户属性条形图（按大类着色） ---------- */
   attrChart(bars, W) {
     return this.barChart(bars, {
-      labelW: 120, labelMax: 10, colorBy: name => groupColorOf(name), title: '客户属性欠款构成',
+      labelW: 120, colorBy: name => groupColorOf(name), title: '客户属性欠款构成',
       empty: this.EMPTY_OWED,
     }, W);
   },
@@ -2041,8 +2070,17 @@ const Dashboard = {
     const totalOf = b => { const [a, c] = seg(b); return a + c; };
     const list = (bars || []).filter(b => totalOf(b) > 0);
     if (!list.length) return `<div class="dash-empty-sm">${opts.empty || '暂无未清应收余额'}</div>`;
-    const color = opts.color || C_PRIMARY, labelW = opts.labelW || 96;
-    const labelMax = opts.labelMax || 7;
+    const color = opts.color || C_PRIMARY;
+    const FS = 12;                       // 标签字号（须与下面 <text font-size> 一致）
+    const base = opts.labelW || 96;
+    /* 标签列宽自适应：按本图**最长名称**的估算宽度定，下限 base、上限
+       min(opts.maxLabelW, 容器 38%)。写死一个值会让长名被截得过狠、短名白占空间。
+       左侧用掉的宽度直接决定柱子可用宽 innerW，故上限必须有，否则柱子被挤没。
+       +20 而非 +12：右边距已吃掉 12（见 fitLabel 调用），余量必须**大于**右边距，
+       否则估算误差会让最长的那个名称差 0.2px 就被误截（实测过）。 */
+    const cap = Math.max(base, Math.min(opts.maxLabelW || 180, Math.round(W * 0.38)));
+    const nameNeed = Math.max(...list.map(b => this.textW(b[0], FS))) + 20;
+    const labelW = Math.round(Math.min(Math.max(nameNeed, base), cap));
     const max = Math.max(...list.map(totalOf)) || 1;
     const rowH = 34, barH = 16, valueW = 80;
     const H = list.length * rowH + 8;
@@ -2056,7 +2094,7 @@ const Dashboard = {
       const wAll = Math.max(3, innerW * total / max);
       const wBal = total > 0 ? wAll * bal / total : 0;
       const barColor = opts.colorBy ? opts.colorBy(name) : color;
-      const label = name.length > labelMax ? name.slice(0, labelMax) + '…' : name;
+      const label = this.fitLabel(name, labelW - 12, FS);
       /* 淡色段 = 决算未定（账内应收）：同色相浅底 + 描边，不引入新色相（颜色只承载语义） */
       const segUnfin = unfin > 0
         ? `<rect x="${labelW + wBal}" y="${y}" width="${Math.max(wAll - wBal, 1.5)}" height="${barH}" rx="2"
@@ -2065,8 +2103,10 @@ const Dashboard = {
       const tip = unfin > 0
         ? `${name} 合计 ${this.wan(total)}（应收余额 ${this.wan(bal)} + 决算未定按账内应收 ${this.wan(unfin)}）`
         : `${name} ${this.wan(bal)}`;
+      /* 标签**左对齐**（默认 text-anchor:start，x=0）：名称列左缘齐平，比右对齐
+         贴着柱子参差不齐更整齐；截断只发生在尾部，读到的始终是名称开头。 */
       return `<g><title>${Utils.escapeHtml(tip)}</title>
-        <text x="${labelW - 10}" y="${y + barH / 2 + 4}" text-anchor="end" font-size="12" fill="${C_INK_600}">${Utils.escapeHtml(label)}</text>
+        <text x="0" y="${y + barH / 2 + 4}" font-size="${FS}" fill="${C_INK_600}">${Utils.escapeHtml(label)}</text>
         ${bal > 0 ? `<rect x="${labelW}" y="${y}" width="${Math.max(wBal, 1.5)}" height="${barH}" rx="2" fill="${barColor}"/>` : ''}
         ${segUnfin}
         <text x="${labelW + wAll + 8}" y="${y + barH / 2 + 4}" font-size="12" fill="${C_INK_950}" font-weight="600">${this.wan(total)}</text></g>`;
